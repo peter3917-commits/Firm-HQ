@@ -3,3 +3,4 @@ pandas>=2.2.0
 requests
 st-gsheets-connection>=0.1.0
 setuptools
+streamlit-autorefresh
