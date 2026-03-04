@@ -27,22 +27,20 @@ try:
     # 1. Pull the Vault Data
     try:
         vault_df = conn.read(worksheet="Vault", ttl=0)
-    except:
+    except Exception:
         vault_df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
 
     if price:
-        # 2. DATA CLEANING & 48H SHREDDER (The Reinforced Version)
+        # 2. DATA CLEANING & 48H SHREDDER
         if not vault_df.empty and "Timestamp" in vault_df.columns:
-            # Step A: Force numeric balance
+            # Force numeric and datetime types
             vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
-            
-            # Step B: Force datetime conversion
             vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
             
-            # Step C: DROP garbage rows (This prevents the .dt error)
+            # DROP garbage rows to prevent .dt accessor errors
             vault_df = vault_df.dropna(subset=['Timestamp', 'Balance']).copy()
             
-            # Step D: Apply Shredder
+            # SHREDDER: Keep only the last 48 hours
             cutoff = datetime.now() - timedelta(hours=48)
             vault_df = vault_df[vault_df['Timestamp'] > cutoff].copy()
             
@@ -59,51 +57,4 @@ try:
         col1.metric("Live BTC", f"${price:,.2f}")
         
         if moving_avg:
-            col2.metric("48h Avg", f"${moving_avg:,.2f}")
-            st_color = "normal" if snap_pct > 0 else "inverse"
-            col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
-            
-            # --- 🏛️ LAWRENCE'S TRADING FLOOR ---
-            st.divider()
-            st.subheader("Lawrence: Trade Execution")
-            profit, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg)
-            
-            if outcome in ["BUY", "SELL"]:
-                st.info(f"🚀 Lawrence triggered a **{outcome}** order!")
-            elif outcome in ["WIN", "LOSS"]:
-                st.write(f"✅ Last Trade Result: **{outcome}** (${profit:.2f})")
-            else:
-                st.write("⚖️ Lawrence is currently **holding**. (Snap < 0.5%)")
-        else:
-            st.info("Collecting data for Arthur...")
-
-        # 5. Recording Logic
-        st.divider()
-        if auto_trade or st.button("Manual Record"):
-            new_entry = pd.DataFrame([{
-                "Staff": "George (Auto)" if auto_trade else "George",
-                "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "Asset": "Bitcoin",
-                "Balance": price
-            }])
-            updated_df = pd.concat([vault_df, new_entry], ignore_index=True)
-            conn.update(worksheet="Vault", data=updated_df)
-            if not auto_trade: st.rerun()
-
-    # 6. Trade Ledger
-    if os.path.exists('trades.csv'):
-        st.subheader("📜 Lawrence's Trade Ledger")
-        trades_df = pd.read_csv('trades.csv')
-        st.dataframe(trades_df.iloc[::-1].head(5), use_container_width=True)
-
-    # 7. The Tape (Safe display)
-    st.subheader("📊 The Vault Tape")
-    if not vault_df.empty:
-        display_df = vault_df.copy()
-        # We check if the column is truly datetime before using .dt
-        if pd.api.types.is_datetime64_any_dtype(display_df['Timestamp']):
-            display_df['Timestamp'] = display_df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        st.dataframe(display_df.iloc[::-1].head(10), use_container_width=True)
-
-except Exception as e:
-    st.error(f"System logic error: {e}")
+            col
