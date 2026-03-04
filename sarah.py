@@ -2,10 +2,10 @@ import pandas as pd
 from data_handler import load_vault, update_vault
 
 def report_trade(asset, trade_type, entry_price, exit_price, amount, p_l, new_bal):
-    # 1. Load the current data from Google Sheets
+    # 1. Load data
     df = load_vault()
 
-    # 2. Prepare the new row
+    # 2. Prepare row to match your headers exactly
     new_data = {
         'Staff': 'Sarah',
         'Timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -17,7 +17,8 @@ def report_trade(asset, trade_type, entry_price, exit_price, amount, p_l, new_ba
         'Balance': new_bal
     }
 
-    # 3. Add to the dataframe and push back to the cloud
-    df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+    # 3. Append and Update
+    new_row = pd.DataFrame([new_data])
+    df = pd.concat([df, new_row], ignore_index=True)
+    
     update_vault(df)
-    print(f"Sarah: Trade recorded in Google Sheets. New Balance: ${new_bal:.2f}")
