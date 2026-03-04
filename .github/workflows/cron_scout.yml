@@ -2,12 +2,14 @@ name: 5-Minute Price Scout
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes
-  workflow_dispatch:      # Allows you to run it manually to test
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   scout:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # <--- CRITICAL: Gives George permission to save files
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -25,3 +27,12 @@ jobs:
         env:
           GSHEETS_SECRET: ${{ secrets.GSHEETS_JSON }}
         run: python scout_job.py
+
+      # --- THE MEMORY FIX: Save the trades.csv back to GitHub ---
+      - name: Commit and Push Trade Log
+        run: |
+          git config --local user.email "george@thefirm.ai"
+          git config --local user.name "George (Background Scout)"
+          git add trades.csv
+          git commit -m "Lawrence updated the Ledger [skip ci]" || echo "No changes to commit"
+          git push
