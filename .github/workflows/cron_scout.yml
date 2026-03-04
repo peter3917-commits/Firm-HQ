@@ -1,0 +1,27 @@
+name: 5-Minute Price Scout
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Runs every 5 minutes
+  workflow_dispatch:      # Allows you to run it manually to test
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas gspread google-auth requests
+
+      - name: Run Scout
+        env:
+          GSHEETS_SECRET: ${{ secrets.GSHEETS_JSON }}
+        run: python scout_job.py
