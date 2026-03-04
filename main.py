@@ -4,7 +4,7 @@ from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import george
 import arthur 
-import lawrence  # <--- Hired Lawrence
+import lawrence 
 import time
 import os
 from datetime import datetime, timedelta
@@ -31,12 +31,18 @@ try:
         vault_df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
 
     if price:
-        # 2. DATA CLEANING & 48H SHREDDER
+        # 2. DATA CLEANING & 48H SHREDDER (The Reinforced Version)
         if not vault_df.empty and "Timestamp" in vault_df.columns:
+            # Step A: Force numeric balance
             vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
-            vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
-            vault_df = vault_df.dropna(subset=['Timestamp', 'Balance'])
             
+            # Step B: Force datetime conversion
+            vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
+            
+            # Step C: DROP garbage rows (This prevents the .dt error)
+            vault_df = vault_df.dropna(subset=['Timestamp', 'Balance']).copy()
+            
+            # Step D: Apply Shredder
             cutoff = datetime.now() - timedelta(hours=48)
             vault_df = vault_df[vault_df['Timestamp'] > cutoff].copy()
             
@@ -60,17 +66,14 @@ try:
             # --- 🏛️ LAWRENCE'S TRADING FLOOR ---
             st.divider()
             st.subheader("Lawrence: Trade Execution")
-            
-            # Lawrence evaluates the snap (Stop loss set to 2.0% by default)
-            profit, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg, stop_loss_pct=2.0)
+            profit, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg)
             
             if outcome in ["BUY", "SELL"]:
                 st.info(f"🚀 Lawrence triggered a **{outcome}** order!")
-                st.write(f"Wager: ${wager:.2f} | Potential Profit: ${profit:.2f}")
             elif outcome in ["WIN", "LOSS"]:
                 st.write(f"✅ Last Trade Result: **{outcome}** (${profit:.2f})")
             else:
-                st.write("⚖️ Lawrence is currently **holding**. (Snap is under 0.5%)")
+                st.write("⚖️ Lawrence is currently **holding**. (Snap < 0.5%)")
         else:
             st.info("Collecting data for Arthur...")
 
@@ -87,17 +90,19 @@ try:
             conn.update(worksheet="Vault", data=updated_df)
             if not auto_trade: st.rerun()
 
-    # 6. The Trade Ledger (Lawrence's History)
+    # 6. Trade Ledger
     if os.path.exists('trades.csv'):
         st.subheader("📜 Lawrence's Trade Ledger")
         trades_df = pd.read_csv('trades.csv')
         st.dataframe(trades_df.iloc[::-1].head(5), use_container_width=True)
 
-    # 7. The Tape
+    # 7. The Tape (Safe display)
     st.subheader("📊 The Vault Tape")
     if not vault_df.empty:
         display_df = vault_df.copy()
-        display_df['Timestamp'] = display_df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        # We check if the column is truly datetime before using .dt
+        if pd.api.types.is_datetime64_any_dtype(display_df['Timestamp']):
+            display_df['Timestamp'] = display_df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
         st.dataframe(display_df.iloc[::-1].head(10), use_container_width=True)
 
 except Exception as e:
