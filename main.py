@@ -4,7 +4,9 @@ from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import george
 import arthur 
+import lawrence  # <--- Hired Lawrence
 import time
+import os
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Firm HQ: 48h Sentinel", page_icon="🏛️")
@@ -31,14 +33,10 @@ try:
     if price:
         # 2. DATA CLEANING & 48H SHREDDER
         if not vault_df.empty and "Timestamp" in vault_df.columns:
-            # Force numeric balance
             vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
-            # Force datetime format
             vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
-            # Remove any rows that failed to convert (NaT or NaN)
             vault_df = vault_df.dropna(subset=['Timestamp', 'Balance'])
             
-            # SHREDDER: Keep only the last 48 hours
             cutoff = datetime.now() - timedelta(hours=48)
             vault_df = vault_df[vault_df['Timestamp'] > cutoff].copy()
             
@@ -58,10 +56,26 @@ try:
             col2.metric("48h Avg", f"${moving_avg:,.2f}")
             st_color = "normal" if snap_pct > 0 else "inverse"
             col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
+            
+            # --- 🏛️ LAWRENCE'S TRADING FLOOR ---
+            st.divider()
+            st.subheader("Lawrence: Trade Execution")
+            
+            # Lawrence evaluates the snap (Stop loss set to 2.0% by default)
+            profit, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg, stop_loss_pct=2.0)
+            
+            if outcome in ["BUY", "SELL"]:
+                st.info(f"🚀 Lawrence triggered a **{outcome}** order!")
+                st.write(f"Wager: ${wager:.2f} | Potential Profit: ${profit:.2f}")
+            elif outcome in ["WIN", "LOSS"]:
+                st.write(f"✅ Last Trade Result: **{outcome}** (${profit:.2f})")
+            else:
+                st.write("⚖️ Lawrence is currently **holding**. (Snap is under 0.5%)")
         else:
             st.info("Collecting data for Arthur...")
 
         # 5. Recording Logic
+        st.divider()
         if auto_trade or st.button("Manual Record"):
             new_entry = pd.DataFrame([{
                 "Staff": "George (Auto)" if auto_trade else "George",
@@ -73,14 +87,18 @@ try:
             conn.update(worksheet="Vault", data=updated_df)
             if not auto_trade: st.rerun()
 
-    # 6. The Tape
-    st.subheader("The Vault Tape")
+    # 6. The Trade Ledger (Lawrence's History)
+    if os.path.exists('trades.csv'):
+        st.subheader("📜 Lawrence's Trade Ledger")
+        trades_df = pd.read_csv('trades.csv')
+        st.dataframe(trades_df.iloc[::-1].head(5), use_container_width=True)
+
+    # 7. The Tape
+    st.subheader("📊 The Vault Tape")
     if not vault_df.empty:
-        # Convert timestamp back to string for clean display in table
         display_df = vault_df.copy()
         display_df['Timestamp'] = display_df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
         st.dataframe(display_df.iloc[::-1].head(10), use_container_width=True)
 
 except Exception as e:
     st.error(f"System logic error: {e}")
-    st.info("If the screen is blank, try deleting any messy rows in your Google Sheet.")
