@@ -1,79 +1,42 @@
 import streamlit as st
 import pandas as pd
-import pytz
-from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
 from streamlit_gsheets_connection import GSheetsConnection
+import george  # Ensure george.py is in your GitHub
 
-# --- 1. CLOUD UI CONFIG ---
-st.set_page_config(page_title="Firm-HQ Cloud", layout="wide", page_icon="🏛️")
-st_autorefresh(interval=30000, key="hq_refresh")
+st.set_page_config(page_title="Firm HQ: Phase 1")
 
-# --- 2. DATA CONNECTION ---
+# 1. Setup Connection
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_vault_cloud():
-    # ttl=0 ensures we get live data from the sheet every time
-    return conn.read(ttl=0) 
+st.title("🏛️ Firm HQ: Phase 1 (George Only)")
 
-# --- 3. THE ENGINE TICK ---
-def run_firm_tick():
-    try:
-        import george, arthur, lawrence, penny, sarah
-        # Background tasks
-        penny.take_taxes_and_overheads()
-        
-        for asset_name in ["bitcoin", "ethereum"]:
-            price = george.scout_live_price(asset_name)
-            history = george.get_recent_history(asset_name)
-            if price is not None and not history.empty:
-                avg, diff = arthur.check_for_snap(asset_name, price, history)
-                if abs(diff) >= 0.4:
-                    p_l, res, wager = lawrence.execute_trade(asset_name, price, avg, 0.5)
-                    if res != "SKIPPED":
-                        sarah.report_trade(asset_name, res, avg, price, 0, p_l, 0)
-    except Exception as e:
-        # We show engine errors in the sidebar so the main UI stays clean
-        st.sidebar.error(f"Staff Error: {e}")
+# 2. George does his job
+price = george.scout_live_price("bitcoin")
 
-# --- 4. DASHBOARD UI ---
-LONDON_TZ = pytz.timezone('Europe/London')
-now = datetime.now(LONDON_TZ)
-
-st.title("🏛️ Firm HQ: Cloud Monitor")
-
-# Load the data
-df = load_vault_cloud()
-
-if not df.empty:
-    # Helper to find columns regardless of hidden spaces or small typos
-    def find_col(name, dataframe):
-        for c in dataframe.columns:
-            if name.lower() in c.lower():
-                return c
-        return None
-
-    bal_col = find_col('Balance', df)
-    staff_col = find_col('Staff', df)
+if price:
+    st.metric("Current Bitcoin Price", f"${price:,.2f}")
     
-    if bal_col:
-        current_bal = df[bal_col].iloc[-1]
-        last_staff = df[staff_col].iloc[-1] if staff_col else "Unknown"
+    # 3. Record to Google Sheets
+    if st.button("George: Record Price Now"):
+        # Load current data
+        df = conn.read(worksheet="Vault", ttl=0)
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Vault Balance", f"${float(current_bal):,.2f}")
-        c2.metric("Last Action By", last_staff)
-        c3.metric("London Time", now.strftime('%H:%M:%S'))
+        # Create new row
+        new_row = pd.DataFrame([{
+            "Staff": "George",
+            "Timestamp": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "Asset": "Bitcoin",
+            "Balance": price  # Recording price as balance just to test writing
+        }])
         
-        st.subheader("📝 Recent Ledger Entries")
-        st.dataframe(df.tail(10), use_container_width=True)
-    else:
-        st.error(f"Could not find 'Balance' column. Headers detected: {list(df.columns)}")
+        # Update Sheet
+        updated_df = pd.concat([df, new_row], ignore_index=True)
+        conn.update(worksheet="Vault", data=updated_df)
+        st.success("George has written to the Vault!")
 else:
-    st.warning("GSheet is connected but appears to be empty.")
+    st.error("George couldn't find the price. Check your internet/API.")
 
-# Run the background logic
-run_firm_tick()
-
-# Run one "Tick" of the engine on every refresh
-run_firm_tick()
+# 4. Show the Log
+st.subheader("Vault Log")
+log_df = conn.read(worksheet="Vault", ttl=0)
+st.dataframe(log_df.tail(5))
