@@ -1,55 +1,75 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+from streamlit_autorefresh import st_autorefresh # <-- The Heartbeat
 import george
 import arthur 
+import time
 
-st.set_page_config(page_title="Firm HQ: Phase 2", page_icon="🏛️")
-st.title("🏛️ Firm HQ: Phase 2")
+st.set_page_config(page_title="Firm HQ: Auto-Sentinel", page_icon="🏛️")
+
+# 🏛️ HQ HEADER
+st.title("🏛️ Firm HQ: Auto-Sentinel")
+
+# 🛰️ AUTO-PILOT CONTROL
+st.sidebar.header("Sentinel Controls")
+auto_trade = st.sidebar.toggle("Activate George Auto-Scout", value=False)
+
+if auto_trade:
+    # Refresh every 300,000 milliseconds (5 minutes)
+    st_autorefresh(interval=300000, key="george_heartbeat")
+    st.sidebar.success("George is scouting every 5 mins...")
+else:
+    st.sidebar.info("Manual Mode Active")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    # 1. George Scouts the Price
     price = george.scout_live_price("bitcoin")
     
-    # 2. Pull the Vault Data
-    try:
-        vault_df = conn.read(worksheet="Vault", ttl=0)
-    except:
-        vault_df = pd.DataFrame()
+    # 1. Pull the Vault Data
+    vault_df = conn.read(worksheet="Vault", ttl=0)
 
-    # 3. The HQ Control Room
     if price:
-        # --- DATA CLEANER ---
+        # 2. Data Cleaning for Arthur
         if not vault_df.empty and "Balance" in vault_df.columns:
-            # Force 'Balance' to be a number, turning errors into 'NaN'
             vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
-            # Drop any rows where the balance didn't convert correctly
             clean_history = vault_df.dropna(subset=['Balance']).copy()
-            # Arthur needs the column named 'price_usd'
             history_for_arthur = clean_history.rename(columns={"Balance": "price_usd"})
         else:
             history_for_arthur = pd.DataFrame(columns=["price_usd"])
 
-        # --- ARTHUR'S LOGIC ---
+        # 3. Arthur's Analysis
         moving_avg, snap_pct = arthur.check_for_snap("Bitcoin", price, history_for_arthur)
         
-        # --- DISPLAY ---
+        # 4. Market Metrics
         st.subheader("Market Intel")
         col1, col2, col3 = st.columns(3)
         col1.metric("Live BTC", f"${price:,.2f}")
         
         if moving_avg and moving_avg > 0:
             col2.metric("48h Avg", f"${moving_avg:,.2f}")
-            col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%")
+            st_color = "normal" if snap_pct > 0 else "inverse"
+            col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
         else:
-            col2.info("Awaiting Tape...")
-            col3.info("Awaiting Tape...")
+            col2.info("Collecting Tape...")
 
-        # 4. Record Button
-        st.divider()
-        if st.button("George: Record Current Price"):
+        # 5. Automatic Recording Logic
+        # If Auto-Scout is ON, George records the price automatically
+        if auto_trade:
+            # We check if the last recorded price is different or the same
+            # To avoid spamming the sheet with the exact same second
+            new_row = pd.DataFrame([{
+                "Staff": "George (Auto)",
+                "Timestamp": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "Asset": "Bitcoin",
+                "Balance": price
+            }])
+            updated_df = pd.concat([vault_df, new_row], ignore_index=True)
+            conn.update(worksheet="Vault", data=updated_df)
+            st.toast("George recorded a new price entry.")
+
+        # Manual Override Button
+        elif st.button("Manual Record"):
             new_row = pd.DataFrame([{
                 "Staff": "George",
                 "Timestamp": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -58,15 +78,12 @@ try:
             }])
             updated_df = pd.concat([vault_df, new_row], ignore_index=True)
             conn.update(worksheet="Vault", data=updated_df)
-            st.success("Entry added. Refreshing...")
             st.rerun()
 
-    # 5. The Log (Always Visible)
+    # 6. The Tape
     st.subheader("The Vault Tape")
     if not vault_df.empty:
-        st.dataframe(vault_df.tail(10), use_container_width=True)
-    else:
-        st.info("The Vault is currently empty.")
+        st.dataframe(vault_df.iloc[::-1].head(10), use_container_width=True)
 
 except Exception as e:
-    st.error(f"System logic error: {e}")
+    st.error(f"Sentinel Error: {e}")
