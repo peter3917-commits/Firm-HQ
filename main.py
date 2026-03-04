@@ -33,17 +33,12 @@ try:
     if price:
         # 2. DATA CLEANING & 48H SHREDDER
         if not vault_df.empty and "Timestamp" in vault_df.columns:
-            # Force numeric and datetime types
             vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
             vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
-            
-            # DROP garbage rows to prevent .dt accessor errors
             vault_df = vault_df.dropna(subset=['Timestamp', 'Balance']).copy()
             
-            # SHREDDER: Keep only the last 48 hours
             cutoff = datetime.now() - timedelta(hours=48)
             vault_df = vault_df[vault_df['Timestamp'] > cutoff].copy()
-            
             history_for_arthur = vault_df.rename(columns={"Balance": "price_usd"})
         else:
             history_for_arthur = pd.DataFrame(columns=["price_usd"])
@@ -57,4 +52,56 @@ try:
         col1.metric("Live BTC", f"${price:,.2f}")
         
         if moving_avg:
-            col
+            col2.metric("48h Avg", f"${moving_avg:,.2f}")
+            st_color = "normal" if snap_pct > 0 else "inverse"
+            col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
+            
+            # --- 🏛️ LAWRENCE'S TRADING FLOOR ---
+            st.divider()
+            st.subheader("Lawrence: High-Volatility Execution")
+            st.caption("Strategy: 2.0% Snap Trigger | 0.5% Stop-Loss")
+            
+            profit, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg)
+            
+            if outcome in ["BUY", "SELL"]:
+                st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order!")
+            elif outcome == "WIN":
+                st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${profit:.2f})")
+            elif outcome == "LOSS":
+                st.error(f"🛡️ Shield Active: Lawrence cut a LOSS (${profit:.2f})")
+            elif outcome == "OPEN":
+                st.info("⏳ Trade is OPEN. Lawrence is watching the Magnet.")
+            else:
+                st.write("⚖️ Lawrence is **holding**. (Waiting for a 2% Snap)")
+        else:
+            st.info("Collecting data for Arthur...")
+
+        # 5. Recording Logic
+        st.divider()
+        if auto_trade or st.button("Manual Record"):
+            new_entry = pd.DataFrame([{
+                "Staff": "George (Auto)" if auto_trade else "George",
+                "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "Asset": "Bitcoin",
+                "Balance": price
+            }])
+            updated_df = pd.concat([vault_df, new_entry], ignore_index=True)
+            conn.update(worksheet="Vault", data=updated_df)
+            if not auto_trade: st.rerun()
+
+    # 6. Trade Ledger
+    if os.path.exists('trades.csv'):
+        st.subheader("📜 Lawrence's Trade Ledger")
+        trades_df = pd.read_csv('trades.csv')
+        st.dataframe(trades_df.iloc[::-1].head(10), use_container_width=True)
+
+    # 7. The Tape
+    st.subheader("📊 The Vault Tape")
+    if not vault_df.empty:
+        display_df = vault_df.copy()
+        if pd.api.types.is_datetime64_any_dtype(display_df['Timestamp']):
+            display_df['Timestamp'] = display_df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        st.dataframe(display_df.iloc[::-1].head(10), use_container_width=True)
+
+except Exception as e:
+    st.error(f"System logic error: {e}")
