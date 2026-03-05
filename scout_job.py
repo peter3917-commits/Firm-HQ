@@ -1,70 +1,112 @@
-import george
-import arthur
-import lawrence
 import pandas as pd
 from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
 import os
 import json
+import requests
+import time
 
-# 1. Setup Auth
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds_dict = json.loads(os.environ['GSHEETS_SECRET'])
-creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-client = gspread.authorize(creds)
+# 1. SETUP AUTH & CONNECTION
+try:
+    creds_dict = json.loads(os.environ['GSHEETS_SECRET'])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=[
+        "https://www.googleapis.com/auth/spreadsheets", 
+        "https://www.googleapis.com/auth/drive"
+    ])
+    client = gspread.authorize(creds)
+    # Using your specific Sheet ID
+    sheet = client.open_by_key("1rILDKQMQoLa0KDuZXFIyERBqVcKmVGUjJy4-WXhu-A4").worksheet("Vault")
+except Exception as e:
+    print(f"❌ Auth Error: {e}")
+    exit(1)
 
-# 2. Open the Vault
-sheet_id = "1rILDKQMQoLa0KDuZXFIyERBqVcKmVGUjJy4-WXhu-A4"
-sheet = client.open_by_key(sheet_id).worksheet("Vault")
-
-# 3. George Scouts the Live Price
-price = george.scout_live_price("bitcoin")
-
-if price:
-    # 4. Pull current data for cleaning and analysis
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    
-    # 5. Data Cleaning (Ensure numeric for Arthur)
-    if not df.empty:
-        df['Balance'] = pd.to_numeric(df['Balance'], errors='coerce')
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-        df = df.dropna(subset=['Timestamp', 'Balance'])
-
-    # 6. Arthur & Lawrence: The Strategy Floor
-    # Create the history format Arthur expects
-    history_for_arthur = df.rename(columns={"Balance": "price_usd"})
-    
-    # Arthur calculates the 48h Average
-    moving_avg, snap_pct = arthur.check_for_snap("Bitcoin", price, history_for_arthur)
-    
-    # Lawrence evaluates the 2% Snap
-    if moving_avg:
-        lawrence.execute_trade("Bitcoin", price, moving_avg)
-
-    # 7. Add George's New Entry to the Tape
-    new_entry = {
-        "Staff": "George (Background)",
-        "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "Asset": "Bitcoin",
-        "Balance": price
+def fetch_coinbase_candles(start_time):
+    """George reaches into Coinbase to pull missing 5-minute history."""
+    # Coinbase Public API for candles
+    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
+    # Granularity 300 = 5 minutes
+    params = {
+        'granularity': 300,
+        'start': start_time.isoformat(),
+        'end': datetime.now().isoformat()
     }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        # Columns: [time, low, high, open, close, volume]
+        df_hist = pd.DataFrame(response.json(), columns=['ts', 'low', 'high', 'open', 'close', 'vol'])
+        return df_hist
+    else:
+        print(f"⚠️ Coinbase API Error: {response.status_code}")
+        return pd.DataFrame()
+
+# --- MAIN EXECUTION ---
+# A. Get the current data from the Vault
+raw_data = sheet.get_all_records()
+df = pd.DataFrame(raw_data)
+
+if not df.empty:
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+    last_ts = df['Timestamp'].max()
+else:
+    # If sheet is empty, start from 48 hours ago
+    last_ts = datetime.now() - timedelta(hours=48)
+    df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
+
+now = datetime.now()
+gap_seconds = (now - last_ts).total_seconds()
+
+# B. Check for Gaps (if more than 5 minutes have passed)
+if gap_seconds > 300:
+    print(f"🕵️ George found a gap of {int(gap_seconds/60)} minutes. Fetching missing candles...")
     
-    # 8. Shredder (Keep only last 48h in the Google Sheet)
-    cutoff = datetime.now() - timedelta(hours=48)
-    df = df[df['Timestamp'] > cutoff].copy()
+    history = fetch_coinbase_candles(last_ts)
     
-    # Convert back to string format for Google Sheets update
-    df['Timestamp'] = df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    if not history.empty:
+        # Format the historical data to match our Vault
+        history['Timestamp'] = pd.to_datetime(history['ts'], unit='s')
+        history['Balance'] = history['close']
+        history['Staff'] = "George (Gap-Fill)"
+        history['Asset'] = "Bitcoin"
+        
+        new_entries = history[['Staff', 'Timestamp', 'Asset', 'Balance']]
+        
+        # Append and clean
+        df = pd.concat([df, new_entries], ignore_index=True)
+        print(f"✅ Recovered {len(new_entries)} missing data points.")
+else:
+    # No gap, just grab the current live price
+    print("✨ No major gap found. Recording single live price.")
+    try:
+        # Falling back to a simple price check if the gap is small
+        live_price_req = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot")
+        price = float(live_price_req.json()['data']['amount'])
+        new_row = pd.DataFrame([{
+            "Staff": "George (Background)",
+            "Timestamp": now,
+            "Asset": "Bitcoin",
+            "Balance": price
+        }])
+        df = pd.concat([df, new_row], ignore_index=True)
+    except:
+        print("⚠️ Failed to get live price.")
+
+# C. THE SHREDDER & REFINERY
+# Remove duplicates (important when gap-filling)
+df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
+
+# Keep only the last 48 hours
+cutoff = datetime.now() - timedelta(hours=48)
+df = df[df['Timestamp'] > cutoff]
+
+# D. UPDATE GOOGLE SHEETS
+try:
+    # Prep for upload (convert Timestamps back to strings)
+    df_upload = df.copy()
+    df_upload['Timestamp'] = df_upload['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Combine with new entry
-    final_df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-    
-    # 9. Secure the Vault
     sheet.clear()
-    sheet.update([final_df.columns.values.tolist()] + final_df.values.tolist())
-    
-    print(f"Recorded ${price} to Vault. Snap was {snap_pct:.2f}%. Lawrence evaluated.")
-    sheet.update([df.columns.values.tolist()] + df.values.tolist())
-    print(f"Recorded ${price} to Vault.")
+    sheet.update([df_upload.columns.values.tolist()] + df_upload.values.tolist())
+    print(f"🏛️ Vault Synced: {len(df_upload)} rows now in 48h history.")
+except Exception as e:
+    print(f"❌ Upload Error: {e}")
