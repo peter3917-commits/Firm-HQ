@@ -75,16 +75,27 @@ snap_pct = ((current_price - magnet) / magnet) * 100
 
 # C. LAWRENCE: EXECUTE
 # Lawrence looks at the math Arthur just did and decides to trade
+# We catch all 4 values from the updated lawrence.py
 gross, net, result, wager = lawrence.execute_trade("BTC", current_price, magnet)
 
 # D. SHRED & SYNC
 cutoff = datetime.utcnow() - timedelta(hours=48)
 df = df[df['Timestamp'] > cutoff]
-df_sync = df[['Staff', 'Timestamp', 'Asset', 'Balance']].copy()
-df_sync['Timestamp'] = df_sync['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
-sheet.clear()
-sheet.update([df_sync.columns.values.tolist()] + df_sync.values.tolist())
+if not df.empty:
+    df_sync = df[['Staff', 'Timestamp', 'Asset', 'Balance']].copy()
+    df_sync['Timestamp'] = df_sync['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    sheet.clear()
+    sheet.update([df_sync.columns.values.tolist()] + df_sync.values.tolist())
+
+# --- THE FIRM'S LOG ---
+print("-" * 30)
+print(f"🏛️ Firm Heartbeat | {datetime.now().strftime('%H:%M:%S')}")
+print(f"📈 Price: ${current_price:,.2f} | Magnet: ${magnet:,.2f}")
+print(f"⚡ Snap: {snap_pct:.2f}%")
+print(f"📢 Lawrence says: {result} | Wager: ${wager:.2f}")
+print(f"💰 Net Profit: ${net:.2f}")
+print("-" * 30)
 
 print(f"🏛️ Firm Heartbeat | Price: ${current_price} | Magnet: ${magnet:.2f} | Snap: {snap_pct:.2f}%")
 print(f"📢 Lawrence's Decision: {result}")
