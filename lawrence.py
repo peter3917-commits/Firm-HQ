@@ -7,8 +7,10 @@ def execute_trade(asset, current_price, average):
     bank = 1000.0  
     wager = float(bank * 0.10) # $100 wagers
     
+    # --- SAFETY CHECK ---
+    # Ensure we return 4 values even if data is missing to prevent Scout crashes
     if not current_price or not average or average == 0:
-        return 0.0, "WAITING", 0.0
+        return 0.0, 0.0, "WAITING", wager
 
     snap_pct = ((current_price - average) / average) * 100
     
@@ -47,5 +49,10 @@ def execute_trade(asset, current_price, average):
                                    columns=['timestamp','asset','type','price','wager', 'result','profit_usd'])
         file_exists = os.path.exists('trades.csv')
         trade_log.to_csv('trades.csv', mode='a', header=not file_exists, index=False, lineterminator='\n')
+
+    # --- THE FIX ---
+    # We now return 4 values: gross_profit, net_profit, result_string, and the wager amount.
+    # (Using profit twice here for gross/net as this is a simulation)
+    return profit, profit, result, wager
 
     return profit, result, wager
