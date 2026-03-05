@@ -9,10 +9,10 @@ jobs:
   scout:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # <--- CRITICAL: Gives George permission to save files
+      contents: write  # Allows writing to the repo files
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Upgraded to v4 for 2026 stability
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -30,9 +30,21 @@ jobs:
 
       # --- THE MEMORY FIX: Save the trades.csv back to GitHub ---
       - name: Commit and Push Trade Log
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "george@thefirm.ai"
           git config --local user.name "George (Background Scout)"
+          
+          # 1. Add the file
           git add trades.csv
-          git commit -m "Lawrence updated the Ledger [skip ci]" || echo "No changes to commit"
-          git push
+          
+          # 2. Only commit if there are changes (prevents Error 1)
+          if git diff --cached --quiet; then
+            echo "No changes in trades.csv. Skipping commit."
+          else
+            git commit -m "Lawrence updated the Ledger [skip ci]"
+            
+            # 3. Push with the GITHUB_TOKEN for authority
+            git push origin HEAD:main
+          fi
