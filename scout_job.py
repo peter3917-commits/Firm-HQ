@@ -2,10 +2,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
-import os
-import json
-import requests
-import time
+import os, json, requests
+import lawrence # Ensure lawrence.py is in your GitHub folder!
 
 # 1. SETUP AUTH
 try:
@@ -15,27 +13,26 @@ try:
         "https://www.googleapis.com/auth/drive"
     ])
     client = gspread.authorize(creds)
-    # Ensure this is your correct Sheet ID
     sheet = client.open_by_key("1rILDKQMQoLa0KDuZXFIyERBqVcKmVGUjJy4-WXhu-A4").worksheet("Vault")
 except Exception as e:
     print(f"❌ Auth Error: {e}")
     exit(1)
 
 def fetch_coinbase_candles(start_time):
-    """George pulls missing 5-minute candles to fill any gaps."""
     url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
     params = {
-        'granularity': 300, # 5-minute buckets
+        'granularity': 300,
         'start': start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
         'end': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     }
     response = requests.get(url, params=params)
     if response.status_code == 200:
-        # Schema: [timestamp, low, high, open, close, volume]
         return pd.DataFrame(response.json(), columns=['ts', 'low', 'high', 'open', 'close', 'vol'])
     return pd.DataFrame()
 
-# --- MAIN ENGINE ---
+# --- THE MAIN ENGINE ---
+
+# A. GEORGE: FETCH DATA
 raw_data = sheet.get_all_records()
 df = pd.DataFrame(raw_data)
 
@@ -49,44 +46,45 @@ else:
 now = datetime.utcnow()
 gap_minutes = (now - last_ts).total_seconds() / 60
 
-# Check for gaps longer than 5 minutes
 if gap_minutes > 5.5:
-    print(f"🕵️ George found a {int(gap_minutes)} min gap. Patching timeline...")
+    print(f"🕵️ George found a {int(gap_minutes)} min gap. Patching...")
     history = fetch_coinbase_candles(last_ts)
-    
     if not history.empty:
-        # Convert Unix timestamp to readable format
         history['Timestamp'] = pd.to_datetime(history['ts'], unit='s')
         history['Balance'] = history['close']
         history['Staff'] = "George (Gap-Fill)"
         history['Asset'] = "Bitcoin"
-        
-        new_data = history[['Staff', 'Timestamp', 'Asset', 'Balance']]
-        df = pd.concat([df, new_data], ignore_index=True)
+        df = pd.concat([df, history[['Staff', 'Timestamp', 'Asset', 'Balance']]], ignore_index=True)
 
-# Always try for a current live spot price as well
+# Add current spot price
 try:
     live = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot").json()
-    live_row = pd.DataFrame([{
-        "Staff": "George (Background)",
-        "Timestamp": now,
-        "Asset": "Bitcoin",
-        "Balance": float(live['data']['amount'])
-    }])
+    live_row = pd.DataFrame([{"Staff": "George (Background)", "Timestamp": now, "Asset": "Bitcoin", "Balance": float(live['data']['amount'])}])
     df = pd.concat([df, live_row], ignore_index=True)
 except:
     pass
 
-# THE SHREDDER: Keep only the most recent 48 hours
 df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
+
+# B. ARTHUR: ANALYZE
+# Calculate the 48h Moving Average (Magnet)
+df['Balance'] = pd.to_numeric(df['Balance'])
+magnet = df['Balance'].tail(576).mean()
+current_price = float(df['Balance'].iloc[-1])
+snap_pct = ((current_price - magnet) / magnet) * 100
+
+# C. LAWRENCE: EXECUTE
+# Lawrence looks at the math Arthur just did and decides to trade
+gross, net, result, wager = lawrence.execute_trade("BTC", current_price, magnet)
+
+# D. SHRED & SYNC
 cutoff = datetime.utcnow() - timedelta(hours=48)
 df = df[df['Timestamp'] > cutoff]
+df_sync = df[['Staff', 'Timestamp', 'Asset', 'Balance']].copy()
+df_sync['Timestamp'] = df_sync['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
-# SYNC TO VAULT
-df['Timestamp'] = df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
 sheet.clear()
-# Convert dataframe to a list of lists for gspread update
-data_to_save = [df.columns.values.tolist()] + df.values.tolist()
-sheet.update(data_to_save)
+sheet.update([df_sync.columns.values.tolist()] + df_sync.values.tolist())
 
-print(f"🏛️ Vault is now complete. Records: {len(df)}")
+print(f"🏛️ Firm Heartbeat | Price: ${current_price} | Magnet: ${magnet:.2f} | Snap: {snap_pct:.2f}%")
+print(f"📢 Lawrence's Decision: {result}")
