@@ -46,7 +46,8 @@ else:
 now = datetime.utcnow()
 gap_minutes = (now - last_ts).total_seconds() / 60
 
-if gap_minutes > 5.5:
+# We check for gaps over 6 minutes to avoid unnecessary calls during normal heartbeats
+if gap_minutes > 6:
     print(f"🕵️ George found a {int(gap_minutes)} min gap. Patching...")
     history = fetch_coinbase_candles(last_ts)
     if not history.empty:
@@ -59,7 +60,12 @@ if gap_minutes > 5.5:
 # Add current spot price
 try:
     live = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot").json()
-    live_row = pd.DataFrame([{"Staff": "George (Background)", "Timestamp": now, "Asset": "Bitcoin", "Balance": float(live['data']['amount'])}])
+    live_row = pd.DataFrame([{
+        "Staff": "George (Background)", 
+        "Timestamp": now, 
+        "Asset": "Bitcoin", 
+        "Balance": float(live['data']['amount'])
+    }])
     df = pd.concat([df, live_row], ignore_index=True)
 except:
     pass
@@ -67,26 +73,30 @@ except:
 df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
 
 # B. ARTHUR: ANALYZE
-# Calculate the 48h Moving Average (Magnet)
 df['Balance'] = pd.to_numeric(df['Balance'])
 magnet = df['Balance'].tail(576).mean()
 current_price = float(df['Balance'].iloc[-1])
 snap_pct = ((current_price - magnet) / magnet) * 100
 
 # C. LAWRENCE: EXECUTE
-# Lawrence looks at the math Arthur just did and decides to trade
-# We catch all 4 values from the updated lawrence.py
 gross, net, result, wager = lawrence.execute_trade("BTC", current_price, magnet)
 
-# D. SHRED & SYNC
+# D. SHRED & HIGH-SPEED SYNC
 cutoff = datetime.utcnow() - timedelta(hours=48)
 df = df[df['Timestamp'] > cutoff]
 
 if not df.empty:
     df_sync = df[['Staff', 'Timestamp', 'Asset', 'Balance']].copy()
     df_sync['Timestamp'] = df_sync['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-    sheet.clear()
-    sheet.update([df_sync.columns.values.tolist()] + df_sync.values.tolist())
+    
+    # NEW: The "Traffic-Jam" Fix. We overwrite starting at A1 in one single batch.
+    data_to_save = [df_sync.columns.values.tolist()] + df_sync.values.tolist()
+    try:
+        # sheet.clear() is removed to save time/API calls
+        sheet.update(range_name='A1', values=data_to_save)
+        print("✅ Vault synchronized successfully.")
+    except Exception as e:
+        print(f"⚠️ Vault sync delay: {e}")
 
 # --- THE FIRM'S LOG ---
 print("-" * 30)
@@ -96,6 +106,3 @@ print(f"⚡ Snap: {snap_pct:.2f}%")
 print(f"📢 Lawrence says: {result} | Wager: ${wager:.2f}")
 print(f"💰 Net Profit: ${net:.2f}")
 print("-" * 30)
-
-print(f"🏛️ Firm Heartbeat | Price: ${current_price} | Magnet: ${magnet:.2f} | Snap: {snap_pct:.2f}%")
-print(f"📢 Lawrence's Decision: {result}")
