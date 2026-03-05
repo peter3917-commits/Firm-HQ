@@ -61,16 +61,18 @@ try:
             st.subheader("Lawrence: High-Volatility Execution")
             st.caption("Strategy: 2.0% Snap Trigger | 0.5% Stop-Loss")
             
-            profit, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg)
+            # UPDATED: Catching 4 values: gross, net, outcome, wager
+            gross, net, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg)
             
             if outcome in ["BUY", "SELL"]:
                 st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order!")
+                st.write(f"Position Size: **${wager:,.2f}**")
             elif outcome == "WIN":
-                st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${profit:.2f})")
+                st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${net:.2f})")
             elif outcome == "LOSS":
-                st.error(f"🛡️ Shield Active: Lawrence cut a LOSS (${profit:.2f})")
+                st.error(f"🛡️ Shield Active: Lawrence cut a LOSS (${net:.2f})")
             elif outcome == "OPEN":
-                st.info("⏳ Trade is OPEN. Lawrence is watching the Magnet.")
+                st.info(f"⏳ Trade is OPEN. Lawrence is watching the Magnet. Current P/L: ${net:.2f}")
             else:
                 st.write("⚖️ Lawrence is **holding**. (Waiting for a 2% Snap)")
         else:
