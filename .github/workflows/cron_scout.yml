@@ -9,10 +9,12 @@ jobs:
   scout:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Allows writing to the repo files
+      contents: write  # Master Key for the Vault
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Upgraded to v4 for 2026 stability
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Pulls full history to prevent "shallow" push errors
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -28,7 +30,7 @@ jobs:
           GSHEETS_SECRET: ${{ secrets.GSHEETS_JSON }}
         run: python scout_job.py
 
-      # --- THE MEMORY FIX: Save the trades.csv back to GitHub ---
+      # --- THE ULTIMATE PERMISSION BYPASS ---
       - name: Commit and Push Trade Log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -36,15 +38,14 @@ jobs:
           git config --local user.email "george@thefirm.ai"
           git config --local user.name "George (Background Scout)"
           
-          # 1. Add the file
-          git add trades.csv
+          # Force add in case of local .gitignore conflicts
+          git add -f trades.csv || true
           
-          # 2. Only commit if there are changes (prevents Error 1)
           if git diff --cached --quiet; then
-            echo "No changes in trades.csv. Skipping commit."
+            echo "No new trades recorded by Lawrence. Skipping push."
           else
             git commit -m "Lawrence updated the Ledger [skip ci]"
             
-            # 3. Push with the GITHUB_TOKEN for authority
-            git push origin HEAD:main
+            # This URL format is the "Nuclear Option" for Error 128
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
           fi
