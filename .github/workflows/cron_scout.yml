@@ -3,6 +3,8 @@ name: 5-Minute Price Scout
 on:
   schedule:
     - cron: '*/5 * * * *'
+  repository_dispatch:
+    types: [ping_george]  # <--- This is the "Doorbell"
   workflow_dispatch:
 
 jobs:
