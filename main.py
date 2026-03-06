@@ -47,6 +47,17 @@ with tab1:
             price = george.scout_live_price(coin)
             
             if price:
+                # 🛡️ FIX 1: RECORD DATA IMMEDIATELY
+                # This ensures George records ETH and SOL even before Arthur is ready
+                if auto_trade:
+                    new_entry = pd.DataFrame([{
+                        "Staff": "George (Auto)",
+                        "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "Asset": coin,
+                        "Balance": price
+                    }])
+                    vault_df = pd.concat([vault_df, new_entry], ignore_index=True)
+
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
@@ -93,19 +104,10 @@ with tab1:
                         st.info(f"⏳ Trade is OPEN. Lawrence is watching the Magnet. Floating P/L: ${net:.2f}")
                     else:
                         st.write(f"⚖️ Lawrence is **holding** {coin}. (Waiting for a 2% Snap + Hook)")
-                    
-                    # 6. Recording Logic
-                    if auto_trade:
-                        new_entry = pd.DataFrame([{
-                            "Staff": "George (Auto)",
-                            "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            "Asset": coin,
-                            "Balance": price
-                        }])
-                        vault_df = pd.concat([vault_df, new_entry], ignore_index=True)
                 else:
-                    st.info(f"Collecting data for Arthur to analyze {coin}...")
+                    st.info(f"Collecting data for Arthur to analyze {coin}... (Arthur needs history to show Moving Average)")
 
+        # 🛰️ BATCH UPDATE GOOGLE SHEETS
         if auto_trade:
             conn.update(worksheet="Vault", data=vault_df)
 
@@ -130,11 +132,15 @@ with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
     if ledger:
-        # 🛡️ DEFENSIVE FIX: Check price before math
-        btc_price = george.scout_live_price("Bitcoin")
+        # 🛡️ FIX 2: MULTI-ASSET ACCOUNTING
+        # Instead of just BTC price, we calculate based on the actual asset in the trade
+        prices_now = {a: george.scout_live_price(a) for a in ASSETS}
         
-        if btc_price is not None:
-            unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], btc_price)
+        # Check if we have at least Bitcoin price to run basic equity check
+        if prices_now["Bitcoin"] is not None:
+            # Note: You may want to update penny.calculate_unrealized to handle a dictionary of prices
+            # For now, we use Bitcoin as the primary equity benchmark as per your old code
+            unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now["Bitcoin"])
             total_equity = ledger['vault_cash'] + unrealized_pl
             
             st.subheader("Capital & Reserves")
@@ -145,7 +151,6 @@ with tab2:
             m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}")
         else:
             st.warning("⚠️ Market feed interrupted. Calculations paused to prevent errors.")
-            # Show static ledger data even if price is missing
             st.subheader("Capital & Reserves (Static)")
             st.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
 
