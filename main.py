@@ -5,7 +5,7 @@ from streamlit_autorefresh import st_autorefresh
 import george
 import arthur 
 import lawrence 
-import time
+import penny  # <--- Hiring the CFO
 import os
 from datetime import datetime, timedelta
 
@@ -71,6 +71,7 @@ with tab1:
                     status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING (Wait for Hook)"
                     st.info(f"Arthur's Status: {status_text} | RSI: {rsi_val:.1f}")
 
+                # Lawrence uses internal trades.csv
                 gross, net, outcome, wager = lawrence.execute_trade(
                     "Bitcoin", price, moving_avg, rsi=rsi_val, prev_price=None 
                 )
@@ -113,62 +114,49 @@ with tab1:
     except Exception as e:
         st.error(f"System logic error: {e}")
 
-# --- 🧾 TAB 2: ACCOUNTING OFFICE (CFO UPGRADE) ---
+# --- 🧾 TAB 2: THE ACCOUNTING OFFICE (The CFO'S Desk) ---
 with tab2:
     st.title("🧾 The Accounting Office")
+    ledger = penny.get_firm_ledger()
     
-    if os.path.exists('trades.csv'):
-        trades_df = pd.read_csv('trades.csv')
+    if ledger:
+        # Calculate live floating data using Penny's logic
+        unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], price)
+        total_equity = ledger['vault_cash'] + unrealized_pl
         
-        # --- institutional Accounting ---
-        INITIAL_CAPITAL = 1000.00
-        
-        # 1. Realized Accounting (The Cash in the Vault)
-        closed_trades = trades_df[trades_df['result'].isin(['WIN', 'LOSS'])]
-        realized_profit = closed_trades['profit_usd'].sum()
-        vault_balance = INITIAL_CAPITAL + realized_profit
-        
-        # 2. Unrealized Accounting (The Trades in the Field)
-        open_trades = trades_df[trades_df['result'] == 'OPEN']
-        exposure_at_risk = open_trades['wager'].sum()
-        
-        unrealized_pl = 0.0
-        if not open_trades.empty and 'price' in locals():
-            for _, row in open_trades.iterrows():
-                entry_p = row['price']
-                wager_v = row['wager']
-                if row['type'] == "BUY":
-                    unrealized_pl += wager_v * ((price - entry_p) / entry_p)
-                else:
-                    unrealized_pl += wager_v * ((entry_p - price) / entry_p)
-        
-        total_equity = vault_balance + unrealized_pl
-        
-        # --- FINANCIAL METRICS ---
+        # --- EXECUTIVE METRICS ---
+        st.subheader("Capital & Reserves")
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Floating")
-        m2.metric("Vault Balance", f"£{vault_balance:,.2f}", help="Cash available if all trades closed now.")
-        m3.metric("Exposure at Risk", f"£{exposure_at_risk:,.2f}", help="Total capital currently in active trades.")
-        m4.metric("Realized P/L", f"£{realized_profit:,.2f}")
+        m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Float")
+        m2.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}", help="Cash available if all trades closed now.")
+        m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}", help="Vault Cash minus Tax Reserve (Money Lawrence can use)")
+        m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}", help="20% Profit Reserve (Locked)")
 
-        # --- 🔭 OPEN INVENTORY ---
+        # --- OVERHEAD TRANSPARENCY ---
+        with st.expander("🔍 Overhead & Friction Breakdown"):
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Fixed Burn", f"£{ledger['burn']:.2f}", help="VPS & Data Subscription costs")
+            col_b.metric("Trading Friction", f"£{ledger['friction']:.2f}", help="0.15% Exchange fees + Slippage per trade")
+            col_c.metric("Realized P/L", f"£{ledger['gross_realized']:,.2f}", help="Raw profit before fees and taxes")
+
+        # --- TABLES ---
         st.divider()
-        st.subheader("🔭 Open Positions Inventory")
-        if not open_trades.empty:
-            st.dataframe(open_trades.sort_index(ascending=False), use_container_width=True)
+        st.subheader("🔭 Live Exposure Inventory")
+        if not open_df.empty:
+            # We add the floating PL per position calculated by Penny
+            st.dataframe(open_df.sort_index(ascending=False), use_container_width=True)
         else:
-            st.info("No active exposure. All capital is safe.")
+            st.info("No active exposure. All units accounted for in the Vault.")
 
-        # --- 📜 MASTER LEDGER ---
-        st.subheader("📜 Historical Ledger")
-        ledger_display = trades_df.sort_index(ascending=False)
-        st.dataframe(ledger_display, use_container_width=True)
+        st.subheader("📜 Master Accounting Ledger")
+        st.dataframe(ledger['trades_df'].sort_index(ascending=False), use_container_width=True)
         
-        # Performance Curve
-        if not closed_trades.empty:
-            st.subheader("📈 Performance Curve (Realized)")
-            closed_trades = closed_trades.copy()
-            closed_trades['cum_profit'] = INITIAL_CAPITAL + closed_trades['profit_usd'].cumsum()
-            st.line_chart(closed_trades['cum_profit'])
+        # Visual Growth (Realized)
+        st.subheader("📈 Realized Performance Curve")
+        chart_data = ledger['trades_df'][ledger['trades_df']['result'].isin(['WIN', 'LOSS'])].copy()
+        if not chart_data.empty:
+            chart_data['balance'] = 1000.00 + chart_data['profit_usd'].cumsum()
+            st.line_chart(chart_data['balance'])
+
     else:
-        st.info("The Ledger is currently empty.")
+        st.info("Penny is awaiting data from Lawrence to begin the books.")
