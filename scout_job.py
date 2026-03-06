@@ -37,13 +37,14 @@ raw_data = sheet.get_all_records()
 df = pd.DataFrame(raw_data)
 
 if not df.empty:
-    # 🛡️ THE NORMALIZATION SHIELD (Fixed the KeyError: 'Asset')
+    # 🛡️ THE NORMALIZATION SHIELD
     df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in df.columns]
     
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     last_ts = df['Timestamp'].max()
 else:
-    last_ts = datetime.utcnow() - timedelta(hours=48)
+    # Defaulting to a 50h lookback if sheet is empty to build the initial buffer
+    last_ts = datetime.utcnow() - timedelta(hours=50)
     df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
 
 now = datetime.utcnow()
@@ -77,25 +78,29 @@ for asset_name, product_id in ASSETS.items():
     except:
         pass
 
+# Ensure we keep multi-asset records and remove exact duplicates
 df = df.drop_duplicates(subset=['Timestamp', 'Asset']).sort_values('Timestamp')
 
 # B. ARTHUR & LAWRENCE: SECTOR ANALYSIS
-# We process each asset individually so Lawrence can check his trades for each
 for asset_name in ASSETS.keys():
     asset_df = df[df['Asset'] == asset_name].copy()
     if not asset_df.empty:
         asset_df['Balance'] = pd.to_numeric(asset_df['Balance'])
+        
+        # Arthur calculates the "Magnet" using the last 576 points (exactly 48 hours)
+        # We now have a 50h buffer, so this will always be a full sample.
         magnet = asset_df['Balance'].tail(576).mean()
         current_price = float(asset_df['Balance'].iloc[-1])
         
-        # C. LAWRENCE: EXECUTE (Now calling with the corrected asset name)
-        # Using the mapping to ensure we pass the same asset tag as main.py
+        # C. LAWRENCE: EXECUTE
         gross, net, result, wager = lawrence.execute_trade(asset_name, current_price, magnet)
         
         print(f"Sect: {asset_name} | Price: ${current_price:,.2f} | Magnet: ${magnet:,.2f} | Law: {result}")
 
 # D. SHRED & HIGH-SPEED SYNC
-cutoff = datetime.utcnow() - timedelta(hours=48)
+# --- 🛡️ THE 50H BUFFER SHIELD ---
+# We keep 50 hours in the sheet so main.py (looking for 48h) never runs out of data.
+cutoff = datetime.utcnow() - timedelta(hours=50)
 df = df[df['Timestamp'] > cutoff]
 
 if not df.empty:
@@ -104,7 +109,9 @@ if not df.empty:
     
     data_to_save = [df_sync.columns.values.tolist()] + df_sync.values.tolist()
     try:
+        # Clear and update to ensure the sheet stays clean
+        sheet.clear()
         sheet.update(range_name='A1', values=data_to_save)
-        print("✅ Vault synchronized successfully.")
+        print(f"✅ Vault synchronized. Current Depth: {len(df_sync)} rows across 3 sectors.")
     except Exception as e:
         print(f"⚠️ Vault sync delay: {e}")
