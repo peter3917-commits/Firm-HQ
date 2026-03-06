@@ -2,10 +2,10 @@ import pandas as pd
 import os
 from datetime import datetime
 
-def execute_trade(asset, current_price, average, rsi=None, prev_price=None):
+def execute_trade(asset, current_price, average, rsi=None, hook_detected=False):
     """
-    Lawrence 2.0: Now with Capital Management and Active Trade detection.
-    Aiming for 50% Win Rate with 4:1 Reward-to-Risk.
+    Lawrence 2.0: High-Volatility Execution Specialist.
+    Logic: 2% Snap Trigger | 0.5% Stop-Loss | 50% Target Win Rate.
     """
     
     # --- CAPITAL MANAGEMENT ---
@@ -13,11 +13,10 @@ def execute_trade(asset, current_price, average, rsi=None, prev_price=None):
     WAGER_SIZE = TOTAL_BANK * 0.10 # Strict £100 per trade
     
     # --- STRATEGY SETTINGS ---
-    TRIGGER_THRESHOLD = 2.0  # 2% Gap
+    TRIGGER_THRESHOLD = 2.0  # 2% Gap from Magnet
     STOP_LOSS_PCT = 0.5      # 0.5% Shield
     
-    # Initial status
-    trade_type = "WAITING"
+    # Default outputs
     profit = 0.0
     result = "HOLD"
 
@@ -25,51 +24,74 @@ def execute_trade(asset, current_price, average, rsi=None, prev_price=None):
     if not current_price or not average or average == 0:
         return 0.0, 0.0, "WAITING", WAGER_SIZE
 
-    # --- ACTIVE TRADE CHECK (The 'One-at-a-time' Rule) ---
+    # --- 1. ACTIVE TRADE MONITORING ---
     if os.path.exists('trades.csv'):
-        existing_trades = pd.read_csv('trades.csv')
-        # Check if there are any rows where 'result' is still 'OPEN'
-        if not existing_trades.empty and (existing_trades['result'] == 'OPEN').any():
-            # If a trade is open, Lawrence's only job is to see if it's time to CLOSE it
-            active_trade = existing_trades[existing_trades['result'] == 'OPEN'].iloc[-1]
-            entry_price = active_trade['price']
+        df = pd.read_csv('trades.csv')
+        if not df.empty and (df['result'] == 'OPEN').any():
+            # Get the details of the current open trade
+            idx = df[df['result'] == 'OPEN'].index[-1]
+            entry_price = df.at[idx, 'price']
+            trade_type = df.at[idx, 'type']
             
-            # Calculate distance from entry for the Shield or the Magnet
-            # (Simplifying: we check if price moved back to average or hit SL)
-            current_move = ((current_price - entry_price) / entry_price) * 100
+            # Calculate current performance
+            # For BUY: (Price - Entry) | For SELL: (Entry - Price)
+            diff_pct = ((current_price - entry_price) / entry_price) * 100
+            if trade_type == "SELL": diff_pct = -diff_pct
             
-            # Logic to close a BUY trade
-            if active_trade['type'] == "BUY":
-                if current_price >= average: # Target Hit
-                    return float(WAGER_SIZE * 0.02), float(WAGER_SIZE * 0.02), "WIN", WAGER_SIZE
-                elif current_move <= -STOP_LOSS_PCT: # Shield Broken
-                    return -float(WAGER_SIZE * 0.005), -float(WAGER_SIZE * 0.005), "LOSS", WAGER_SIZE
-                else:
-                    return 0.0, 0.0, "OPEN", WAGER_SIZE
+            # CHECK FOR WIN: Price has returned to the 48h Average (Magnet)
+            # We use a small 0.1% buffer to ensure the trade closes smoothly
+            hit_magnet = (trade_type == "BUY" and current_price >= average) or \
+                         (trade_type == "SELL" and current_price <= average)
 
-    # --- ARTHUR'S PATIENCE FILTERS (The Jury) ---
+            if hit_magnet:
+                result = "WIN"
+                profit = WAGER_SIZE * (abs(current_price - entry_price) / entry_price)
+                df.at[idx, 'result'] = "WIN"
+                df.at[idx, 'profit_usd'] = profit
+                df.to_csv('trades.csv', index=False)
+                return profit, profit, "WIN", WAGER_SIZE
+
+            # CHECK FOR LOSS: Price hit the 0.5% Shield
+            elif diff_pct <= -STOP_LOSS_PCT:
+                result = "LOSS"
+                profit = -(WAGER_SIZE * (STOP_LOSS_PCT / 100))
+                df.at[idx, 'result'] = "LOSS"
+                df.at[idx, 'profit_usd'] = profit
+                df.to_csv('trades.csv', index=False)
+                return profit, profit, "LOSS", WAGER_SIZE
+            
+            # STILL OPEN: Calculate floating P/L for the dashboard
+            else:
+                floating_pl = WAGER_SIZE * (diff_pct / 100)
+                return 0.0, floating_pl, "OPEN", WAGER_SIZE
+
+    # --- 2. NEW TRADE ANALYSIS (THE JURY) ---
     snap_pct = ((current_price - average) / average) * 100
     
-    # 1. THE STRIKE (Only if no trade is open)
-    # We add a small 'Hook' check: only buy if price is slightly higher than prev_price
-    is_hooked = True
-    if prev_price and current_price < prev_price:
-        is_hooked = False # Still falling, wait for the hook!
+    # Criteria for a BUY:
+    # 1. Price is 2% below average
+    # 2. Arthur sees a 'Hook' (Price turned up)
+    # 3. RSI is below 35 (Oversold condition)
+    can_buy = (snap_pct <= -TRIGGER_THRESHOLD) and hook_detected and (rsi is not None and rsi < 35)
+    
+    # Criteria for a SELL:
+    # 1. Price is 2% above average
+    # 2. Arthur sees a 'Hook' (Price turned down)
+    # 3. RSI is above 65 (Overbought condition)
+    can_sell = (snap_pct >= TRIGGER_THRESHOLD) and (not hook_detected) and (rsi is not None and rsi > 65)
 
-    if snap_pct <= -TRIGGER_THRESHOLD and is_hooked:
-        trade_type = "BUY"
-    elif snap_pct >= TRIGGER_THRESHOLD and is_hooked:
-        trade_type = "SELL"
+    trade_action = "WAITING"
+    if can_buy: trade_action = "BUY"
+    elif can_sell: trade_action = "SELL"
 
-    # 2. LOGGING NEW TRADES
-    if trade_type != "WAITING":
-        result = "OPEN"
+    # --- 3. EXECUTION & LOGGING ---
+    if trade_action != "WAITING":
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        trade_log = pd.DataFrame([[ts, asset.upper(), trade_type, float(current_price), WAGER_SIZE, result, 0.0]], 
+        new_trade = pd.DataFrame([[ts, asset.upper(), trade_action, float(current_price), WAGER_SIZE, "OPEN", 0.0]], 
                                    columns=['timestamp','asset','type','price','wager', 'result','profit_usd'])
         
         file_exists = os.path.exists('trades.csv')
-        trade_log.to_csv('trades.csv', mode='a', header=not file_exists, index=False, lineterminator='\n')
+        new_trade.to_csv('trades.csv', mode='a', header=not file_exists, index=False, lineterminator='\n')
+        return 0.0, 0.0, trade_action, WAGER_SIZE
 
-    # Return the 4 values required by the Scout engine
-    return profit, profit, result, WAGER_SIZE
+    return 0.0, 0.0, "HOLD", WAGER_SIZE
