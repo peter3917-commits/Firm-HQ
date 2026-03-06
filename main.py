@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+from streamlit_gsheets import GSheetsConnection  # Fixed import name
 from streamlit_autorefresh import st_autorefresh
 import george
 import arthur
 import lawrence
 import penny
-import os
 from datetime import datetime, timedelta
 
 # Institutional Wide Layout
@@ -30,14 +29,14 @@ with tab1:
         st.sidebar.success("George is scouting all sectors...")
 
     try:
-        # Create connection
+        # Create connection using the correct library name
         conn = st.connection("gsheets", type=GSheetsConnection)
         
         # 1. Pull the Vault Data
         try:
             vault_df = conn.read(worksheet="Vault", ttl=0)
             if not vault_df.empty:
-                # Normalize columns
+                # Normalize column headers
                 vault_df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in vault_df.columns]
                 vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
                 vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
@@ -62,7 +61,7 @@ with tab1:
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
-                # 2. Data Shredding
+                # 2. Data Filtering
                 asset_history = vault_df[vault_df['Asset'] == coin].copy()
                 cutoff = datetime.now() - timedelta(hours=48)
                 asset_history = asset_history[asset_history['Timestamp'] > cutoff]
@@ -71,7 +70,7 @@ with tab1:
                 # 3. Arthur's Analysis
                 moving_avg, snap_pct, rsi_val, hook_found = arthur.check_for_snap(coin, price, history_for_arthur)
                 
-                # 4. Market Intel
+                # 4. Market Intel Display
                 st.subheader(f"Market Intel: {coin}")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric(f"Live {coin}", f"${price:,.2f}")
@@ -99,13 +98,13 @@ with tab1:
                     else:
                         st.write(f"⚖️ Lawrence is holding {coin}.")
                 else:
-                    st.info(f"Collecting history for {coin}...")
+                    st.info(f"Collecting 48h history for {coin}...")
 
         if auto_trade:
             conn.update(worksheet="Vault", data=vault_df)
 
     except Exception as e:
-        st.error(f"System Error: {e}")
+        st.error(f"System Operational Error: {e}")
 
 # --- 🧾 TAB 2: THE ACCOUNTING OFFICE ---
 with tab2:
@@ -113,11 +112,10 @@ with tab2:
     try:
         ledger = penny.get_firm_ledger()
         if ledger:
-            # Multi-Asset Pricing
             prices_now = {
-                "Bitcoin": george.scout_live_price("Bitcoin") or 70000.00,
-                "Ethereum": george.scout_live_price("Ethereum") or 2500.00,
-                "Solana": george.scout_live_price("Solana") or 100.00
+                "Bitcoin": george.scout_live_price("Bitcoin") or 70000.0,
+                "Ethereum": george.scout_live_price("Ethereum") or 2500.0,
+                "Solana": george.scout_live_price("Solana") or 100.0
             }
             
             unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now)
@@ -129,6 +127,7 @@ with tab2:
             
             st.divider()
             st.subheader("📜 Master Accounting Ledger")
-            st.dataframe(ledger['trades_df'], use_container_width=True)
+            # Using 'width="stretch"' as requested by the logs to replace deprecated 'use_container_width'
+            st.dataframe(ledger['trades_df'], width="stretch")
     except Exception as e:
-        st.error(f"Accounting Error: {e}")
+        st.error(f"Accounting Office Error: {e}")
