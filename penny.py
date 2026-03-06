@@ -28,6 +28,7 @@ def get_firm_ledger():
     # 3. Operational Burn (Monthly Costs)
     burn_total = 0.0
     if not os.path.exists('overheads.csv'):
+        # First-time setup: Log initial monthly costs
         burn_df = pd.DataFrame([{
             "date": datetime.now().strftime('%Y-%m-%d'),
             "category": "Fixed",
@@ -63,6 +64,14 @@ def calculate_unrealized(trades_df, current_price):
     Calculates the HONEST liquidated value of trades.
     Uses Bid/Ask spread so you see what you'd actually walk away with.
     """
+    # 🛡️ THE FIX: SAFETY GUARD
+    # If George fails to find a price, we return 0.0 instead of crashing.
+    if current_price is None:
+        open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
+        if not open_trades.empty:
+            open_trades['floating_pl'] = 0.0
+        return 0.0, open_trades
+
     # Simulate the exit prices
     bid_price = current_price * 0.9999  # What you get if you SELL
     ask_price = current_price * 1.0001  # What you pay to BUY back
