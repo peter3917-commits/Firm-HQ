@@ -36,6 +36,9 @@ with tab1:
         try:
             vault_df = conn.read(worksheet="Vault", ttl=0)
             if not vault_df.empty:
+                # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset' if it exists in Vault
+                vault_df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in vault_df.columns]
+                
                 vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
                 vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
                 vault_df = vault_df.dropna(subset=['Timestamp', 'Balance']).copy()
@@ -131,6 +134,9 @@ with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
     if ledger:
+        # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset' in trades_df before Penny reads it
+        ledger['trades_df'].columns = [c.capitalize() if c.lower() == 'asset' else c for c in ledger['trades_df'].columns]
+
         # 🛡️ MULTI-ASSET ACCOUNTING FIX
         # Create a dictionary of all current prices for Penny to use
         prices_now = {
