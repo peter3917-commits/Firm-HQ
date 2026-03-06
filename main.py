@@ -131,17 +131,20 @@ with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
     if ledger:
-        # 🛡️ UPDATED RESILIENCE LOGIC
-        # We try to get the price, but if George fails, we use a fallback to keep Penny alive
-        btc_price = george.scout_live_price("Bitcoin")
-        
-        # Fallback to the last known market price from 11:30am if API fails
-        if btc_price is None:
-             btc_price = 70538.88 
-             st.sidebar.warning("⚠️ Using Fallback Accounting Price")
+        # 🛡️ MULTI-ASSET ACCOUNTING FIX
+        # Create a dictionary of all current prices for Penny to use
+        prices_now = {
+            "Bitcoin": george.scout_live_price("Bitcoin") or 70538.88,
+            "Ethereum": george.scout_live_price("Ethereum") or 2125.80,
+            "Solana": george.scout_live_price("Solana") or 88.42
+        }
 
-        # Now Penny can run her math without crashing
-        unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], btc_price)
+        # If any price fell back to hardcoded values, notify the sidebar
+        if None in [george.scout_live_price(a) for a in ASSETS]:
+             st.sidebar.warning("⚠️ Using Fallback Accounting Prices")
+
+        # Now Penny runs calculations based on the specific asset of each trade
+        unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now)
         total_equity = ledger['vault_cash'] + unrealized_pl
         
         st.subheader("Capital & Reserves")
