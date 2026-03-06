@@ -9,7 +9,7 @@ import time
 import os
 from datetime import datetime, timedelta
 
-# Set page config once at the top
+# Institutional Wide Layout
 st.set_page_config(page_title="Firm HQ: 48h Sentinel", page_icon="🏛️", layout="wide")
 
 # --- 🏛️ THE FIRM HEADQUARTERS: TABBED NAVIGATION ---
@@ -67,18 +67,12 @@ with tab1:
                 st.divider()
                 st.subheader("Lawrence: High-Volatility Execution")
                 
-                # Show Arthur's Patience Status
                 if abs(snap_pct) >= 2.0:
                     status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING (Wait for Hook)"
                     st.info(f"Arthur's Status: {status_text} | RSI: {rsi_val:.1f}")
 
-                # Pass signals to Lawrence
                 gross, net, outcome, wager = lawrence.execute_trade(
-                    "Bitcoin", 
-                    price, 
-                    moving_avg, 
-                    rsi=rsi_val, 
-                    prev_price=None 
+                    "Bitcoin", price, moving_avg, rsi=rsi_val, prev_price=None 
                 )
                 
                 if outcome in ["BUY", "SELL"]:
@@ -108,57 +102,73 @@ with tab1:
                 conn.update(worksheet="Vault", data=updated_df)
                 if not auto_trade: st.rerun()
 
-        # 7. The Tape (Moved above trade ledger on Tab 1 for flow)
+        # 7. The Tape 
         st.subheader("📊 The Vault Tape")
         if not vault_df.empty:
             display_df = vault_df.copy()
             if pd.api.types.is_datetime64_any_dtype(display_df['Timestamp']):
                 display_df['Timestamp'] = display_df['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            st.dataframe(display_df.iloc[::-1].head(10), use_container_width=True)
+            st.dataframe(display_df.iloc[::-1].head(5), use_container_width=True)
 
     except Exception as e:
         st.error(f"System logic error: {e}")
 
-# --- 🧾 TAB 2: ACCOUNTING OFFICE ---
+# --- 🧾 TAB 2: ACCOUNTING OFFICE (CFO UPGRADE) ---
 with tab2:
     st.title("🧾 The Accounting Office")
     
     if os.path.exists('trades.csv'):
         trades_df = pd.read_csv('trades.csv')
         
-        # --- ACCOUNTING CALCULATIONS ---
-        initial_capital = 1000.00
-        # Calculate Realized Profit (from WIN/LOSS)
-        realized_profit = trades_df[trades_df['result'].isin(['WIN', 'LOSS'])]['profit_usd'].sum()
-        current_bank = initial_capital + realized_profit
+        # --- institutional Accounting ---
+        INITIAL_CAPITAL = 1000.00
         
-        # Calculate Win/Loss Stats
-        wins = len(trades_df[trades_df['result'] == "WIN"])
-        losses = len(trades_df[trades_df['result'] == "LOSS"])
-        total_closed = wins + losses
-        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+        # 1. Realized Accounting (The Cash in the Vault)
+        closed_trades = trades_df[trades_df['result'].isin(['WIN', 'LOSS'])]
+        realized_profit = closed_trades['profit_usd'].sum()
+        vault_balance = INITIAL_CAPITAL + realized_profit
         
-        # --- FINANCIAL SUMMARY METRICS ---
+        # 2. Unrealized Accounting (The Trades in the Field)
+        open_trades = trades_df[trades_df['result'] == 'OPEN']
+        exposure_at_risk = open_trades['wager'].sum()
+        
+        unrealized_pl = 0.0
+        if not open_trades.empty and 'price' in locals():
+            for _, row in open_trades.iterrows():
+                entry_p = row['price']
+                wager_v = row['wager']
+                if row['type'] == "BUY":
+                    unrealized_pl += wager_v * ((price - entry_p) / entry_p)
+                else:
+                    unrealized_pl += wager_v * ((entry_p - price) / entry_p)
+        
+        total_equity = vault_balance + unrealized_pl
+        
+        # --- FINANCIAL METRICS ---
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Vault Balance", f"£{current_bank:,.2f}")
-        m2.metric("Net Profit", f"£{realized_profit:,.2f}", delta=f"{realized_profit:,.2f}")
-        m3.metric("Win Rate", f"{win_rate:.1f}%")
-        m4.metric("Closed Trades", total_closed)
+        m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Floating")
+        m2.metric("Vault Balance", f"£{vault_balance:,.2f}", help="Cash available if all trades closed now.")
+        m3.metric("Exposure at Risk", f"£{exposure_at_risk:,.2f}", help="Total capital currently in active trades.")
+        m4.metric("Realized P/L", f"£{realized_profit:,.2f}")
 
+        # --- 🔭 OPEN INVENTORY ---
         st.divider()
-        
-        # --- MASTER LEDGER ---
-        st.subheader("📜 Live Ledger (Accounting View)")
-        # Sort so newest trades are at the top
+        st.subheader("🔭 Open Positions Inventory")
+        if not open_trades.empty:
+            st.dataframe(open_trades.sort_index(ascending=False), use_container_width=True)
+        else:
+            st.info("No active exposure. All capital is safe.")
+
+        # --- 📜 MASTER LEDGER ---
+        st.subheader("📜 Historical Ledger")
         ledger_display = trades_df.sort_index(ascending=False)
         st.dataframe(ledger_display, use_container_width=True)
         
-        # Simple Profit Chart
-        if not trades_df.empty:
-            st.subheader("📈 Performance Curve")
-            # Create a running balance for the chart
-            trades_df['running_total'] = initial_capital + trades_df['profit_usd'].cumsum()
-            st.line_chart(trades_df['running_total'])
-            
+        # Performance Curve
+        if not closed_trades.empty:
+            st.subheader("📈 Performance Curve (Realized)")
+            closed_trades = closed_trades.copy()
+            closed_trades['cum_profit'] = INITIAL_CAPITAL + closed_trades['profit_usd'].cumsum()
+            st.line_chart(closed_trades['cum_profit'])
     else:
-        st.info("Accounting records are empty. Lawrence hasn't logged any trades to 'trades.csv' yet.")
+        st.info("The Ledger is currently empty.")
