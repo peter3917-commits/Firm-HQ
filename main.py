@@ -3,9 +3,9 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import george
-import arthur 
-import lawrence 
-import penny 
+import arthur
+import lawrence
+import penny
 import os
 from datetime import datetime, timedelta
 
@@ -36,7 +36,7 @@ with tab1:
         try:
             vault_df = conn.read(worksheet="Vault", ttl=0)
             if not vault_df.empty:
-                # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset' if it exists in Vault
+                # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset'
                 vault_df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in vault_df.columns]
                 
                 vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
@@ -63,7 +63,7 @@ with tab1:
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
-                # 2. DATA SHREDDING (Updated to filter by the current 'coin' in the loop)
+                # 2. DATA SHREDDING
                 asset_history = vault_df[vault_df['Asset'] == coin].copy()
                 cutoff = datetime.now() - timedelta(hours=48)
                 asset_history = asset_history[asset_history['Timestamp'] > cutoff]
@@ -107,7 +107,7 @@ with tab1:
                     else:
                         st.write(f"⚖️ Lawrence is **holding** {coin}. (Waiting for a 2% Snap + Hook)")
                 else:
-                    st.info(f"Collecting data for Arthur to analyze {coin}... (Arthur needs history to show Moving Average)")
+                    st.info(f"Collecting data for Arthur to analyze {coin}... (Arthur needs history)")
 
         # 🛰️ BATCH UPDATE GOOGLE SHEETS
         if auto_trade:
@@ -134,22 +134,18 @@ with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
     if ledger:
-        # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset' in trades_df before Penny reads it
+        # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset'
         ledger['trades_df'].columns = [c.capitalize() if c.lower() == 'asset' else c for c in ledger['trades_df'].columns]
 
-        # 🛡️ MULTI-ASSET ACCOUNTING FIX
-        # Create a dictionary of all current prices for Penny to use
         prices_now = {
             "Bitcoin": george.scout_live_price("Bitcoin") or 70538.88,
             "Ethereum": george.scout_live_price("Ethereum") or 2125.80,
             "Solana": george.scout_live_price("Solana") or 88.42
         }
 
-        # If any price fell back to hardcoded values, notify the sidebar
         if None in [george.scout_live_price(a) for a in ASSETS]:
              st.sidebar.warning("⚠️ Using Fallback Accounting Prices")
 
-        # Now Penny runs calculations based on the specific asset of each trade
         unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now)
         total_equity = ledger['vault_cash'] + unrealized_pl
         
@@ -168,4 +164,5 @@ with tab2:
 
         st.divider()
         st.subheader("📜 Master Accounting Ledger")
-        st.dataframe(ledger['trades_df'].sort_index(ascending=False), use_container_width=True)
+        # Updated width to 'stretch' for Streamlit 2025 compliance
+        st.dataframe(ledger['trades_df'].sort_index(ascending=False), width="stretch")
