@@ -43,38 +43,49 @@ try:
         else:
             history_for_arthur = pd.DataFrame(columns=["price_usd"])
 
-        # 3. Arthur's Analysis
-        moving_avg, snap_pct = arthur.check_for_snap("Bitcoin", price, history_for_arthur)
+        # 3. Arthur's Analysis (UPDATED: Now catching 4 signals)
+        moving_avg, snap_pct, rsi_val, hook_found = arthur.check_for_snap("Bitcoin", price, history_for_arthur)
         
         # 4. Market Metrics
         st.subheader("Market Intel")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Live BTC", f"${price:,.2f}")
         
         if moving_avg:
             col2.metric("48h Avg", f"${moving_avg:,.2f}")
             st_color = "normal" if snap_pct > 0 else "inverse"
             col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
+            col4.metric("RSI (14)", f"{rsi_val:.1f}")
             
             # --- 🏛️ LAWRENCE'S TRADING FLOOR ---
             st.divider()
             st.subheader("Lawrence: High-Volatility Execution")
-            st.caption("Strategy: 2.0% Snap Trigger | 0.5% Stop-Loss")
             
-            # UPDATED: Catching 4 values: gross, net, outcome, wager
-            gross, net, outcome, wager = lawrence.execute_trade("Bitcoin", price, moving_avg)
+            # Show Arthur's Patience Status
+            if abs(snap_pct) >= 2.0:
+                status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING (Wait for Hook)"
+                st.info(f"Arthur's Status: {status_text} | RSI: {rsi_val:.1f}")
+
+            # UPDATED: Passing RSI and Hook context to Lawrence
+            gross, net, outcome, wager = lawrence.execute_trade(
+                "Bitcoin", 
+                price, 
+                moving_avg, 
+                rsi=rsi_val, 
+                prev_price=None # Lawrence will use trades.csv for internal tracking
+            )
             
             if outcome in ["BUY", "SELL"]:
                 st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order!")
-                st.write(f"Position Size: **${wager:,.2f}**")
+                st.write(f"Position Size: **${wager:,.2f}** (10% of Capital)")
             elif outcome == "WIN":
                 st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${net:.2f})")
             elif outcome == "LOSS":
                 st.error(f"🛡️ Shield Active: Lawrence cut a LOSS (${net:.2f})")
             elif outcome == "OPEN":
-                st.info(f"⏳ Trade is OPEN. Lawrence is watching the Magnet. Current P/L: ${net:.2f}")
+                st.info(f"⏳ Trade is OPEN. Lawrence is watching the Magnet. Floating P/L: ${net:.2f}")
             else:
-                st.write("⚖️ Lawrence is **holding**. (Waiting for a 2% Snap)")
+                st.write("⚖️ Lawrence is **holding**. (Waiting for a 2% Snap + Hook)")
         else:
             st.info("Collecting data for Arthur...")
 
@@ -91,7 +102,7 @@ try:
             conn.update(worksheet="Vault", data=updated_df)
             if not auto_trade: st.rerun()
 
-    # 6. Trade Ledger
+    # 6. Trade Ledger (Expanded)
     if os.path.exists('trades.csv'):
         st.subheader("📜 Lawrence's Trade Ledger")
         trades_df = pd.read_csv('trades.csv')
