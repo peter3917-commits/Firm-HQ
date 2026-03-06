@@ -2,5 +2,7 @@ streamlit>=1.31.0
 pandas>=2.2.0
 requests
 st-gsheets-connection>=0.1.0
-setuptools
 streamlit-autorefresh
+gspread>=6.0.0
+google-auth>=2.27.0
+setuptools
