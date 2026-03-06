@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Firm HQ: 48h Sentinel", page_icon="🏛️", layout="wide")
 
 # --- 🛰️ ASSET CONFIGURATION ---
-# These must match the display names in your George.py map
 ASSETS = ["Bitcoin", "Ethereum", "Solana"]
 
 # --- 🏛️ THE FIRM HEADQUARTERS ---
@@ -27,14 +26,13 @@ with tab1:
     auto_trade = st.sidebar.toggle("Activate George Auto-Scout", value=False)
 
     if auto_trade:
-        # 5-minute heartbeat
         st_autorefresh(interval=300000, key="george_heartbeat")
         st.sidebar.success("George is scouting all sectors...")
 
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
         
-        # 1. Pull the Vault Data (Full Pull)
+        # 1. Pull the Vault Data
         try:
             vault_df = conn.read(worksheet="Vault", ttl=0)
             if not vault_df.empty:
@@ -45,7 +43,6 @@ with tab1:
             vault_df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
 
         # --- 🛰️ THE MULTI-ASSET LOOP ---
-        # Each coin gets its own Intel and Execution block
         for coin in ASSETS:
             price = george.scout_live_price(coin)
             
@@ -53,7 +50,7 @@ with tab1:
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
-                # 2. DATA SHREDDING (Filter for THIS specific asset)
+                # 2. DATA SHREDDING
                 asset_history = vault_df[vault_df['Asset'] == coin].copy()
                 cutoff = datetime.now() - timedelta(hours=48)
                 asset_history = asset_history[asset_history['Timestamp'] > cutoff]
@@ -72,7 +69,7 @@ with tab1:
                     col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
                     col4.metric("RSI (14)", f"{rsi_val:.1f}")
                     
-                    # 5. Lawrence's Execution per Asset
+                    # 5. Lawrence's Execution
                     if abs(snap_pct) >= 2.0:
                         status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING (Wait for Hook)"
                         st.info(f"Arthur's Status: {status_text} | RSI: {rsi_val:.1f}")
@@ -86,7 +83,7 @@ with tab1:
                     elif outcome == "OPEN":
                         st.info(f"⏳ {coin} trade is OPEN. Floating P/L: ${net:.2f}")
                     
-                    # 6. Recording Logic (Per Asset)
+                    # 6. Recording Logic
                     if auto_trade:
                         new_entry = pd.DataFrame([{
                             "Staff": "George (Auto)",
@@ -98,11 +95,10 @@ with tab1:
                 else:
                     st.info(f"Collecting data for Arthur to analyze {coin}...")
 
-        # Update GSheets once at the end of the loop if auto-scouting
         if auto_trade:
             conn.update(worksheet="Vault", data=vault_df)
 
-        # 7. THE TRI-TAPE (3 Tables for the last 5 entries)
+        # 7. THE TRI-TAPE
         st.divider()
         st.subheader("📊 Sector Tapes (Last 5 Entries)")
         t_col1, t_col2, t_col3 = st.columns(3)
@@ -126,10 +122,16 @@ with tab2:
     ledger = penny.get_firm_ledger()
     
     if ledger:
-        # Using Bitcoin price for general equity reference (or we could use a weighted average)
-        # For now, we fetch the latest BTC price for Penny's floating calculation
+        # 🛡️ DEFENSIVE ACCOUNTING: Handle George API failure
         btc_price = george.scout_live_price("Bitcoin")
-        unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], btc_price)
+        
+        if btc_price:
+            unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], btc_price)
+        else:
+            # Fallback if API is down
+            unrealized_pl = 0.0
+            open_df = ledger['trades_df'][ledger['trades_df']['result'] == 'OPEN'].copy()
+            st.warning("⚠️ Market data feed interrupted. Floating P/L calculations are paused.")
         
         total_equity = ledger['vault_cash'] + unrealized_pl
         
@@ -148,7 +150,10 @@ with tab2:
 
         st.divider()
         st.subheader("🔭 Live Exposure Inventory")
-        st.dataframe(open_df.sort_index(ascending=False), use_container_width=True)
+        if not open_df.empty:
+            st.dataframe(open_df.sort_index(ascending=False), use_container_width=True)
+        else:
+            st.info("No active exposure.")
 
         st.subheader("📜 Master Accounting Ledger")
         st.dataframe(ledger['trades_df'].sort_index(ascending=False), use_container_width=True)
