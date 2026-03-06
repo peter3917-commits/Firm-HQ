@@ -31,13 +31,23 @@ with tab1:
         try:
             vault_df = conn.read(worksheet="Vault", ttl=0)
             if not vault_df.empty:
-                # 🛡️ NORMALIZATION SHIELD: Fixes the 'Asset' vs 'asset' bug
+                # 🛡️ NORMALIZATION SHIELD
                 vault_df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in vault_df.columns]
                 
                 vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
                 vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
+                
+                # --- 🕵️ DEBUG CHECK ---
+                raw_rows = len(vault_df)
                 vault_df = vault_df.dropna(subset=['Timestamp', 'Balance']).copy()
-        except Exception:
+                valid_rows = len(vault_df)
+                
+                if valid_rows > 0:
+                    st.sidebar.info(f"📁 Vault: {valid_rows} active records.")
+                else:
+                    st.warning(f"⚠️ Found {raw_rows} rows in Sheets, but the data format is invalid (Check Dates/Numbers).")
+        except Exception as e:
+            st.error(f"Vault Read Error: {e}")
             vault_df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
 
         # --- 🛰️ THE MULTI-ASSET LOOP ---
@@ -48,9 +58,9 @@ with tab1:
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
-                # 2. Data Shredding (48h Window)
+                # 2. Data Shredding (Slightly widened to 72h for safety)
                 asset_history = vault_df[vault_df['Asset'] == coin].copy()
-                cutoff = datetime.now() - timedelta(hours=48)
+                cutoff = datetime.now() - timedelta(hours=72)
                 asset_history = asset_history[asset_history['Timestamp'] > cutoff]
                 
                 # 3. Arthur's Analysis
@@ -63,7 +73,7 @@ with tab1:
                 c1.metric(f"Live {coin}", f"${price:,.2f}")
                 
                 if moving_avg:
-                    c2.metric("48h Avg", f"${moving_avg:,.2f}")
+                    c2.metric("Avg Window", f"${moving_avg:,.2f}")
                     st_color = "normal" if snap_pct > 0 else "inverse"
                     c3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
                     c4.metric("RSI (14)", f"{rsi_val:.1f}")
@@ -82,7 +92,8 @@ with tab1:
                     else:
                         st.write(f"⚖️ Lawrence is holding {coin}.")
                 else:
-                    st.info(f"Building 48h history for {coin}...")
+                    # This message appears if there isn't enough history in the last 72h
+                    st.info(f"📡 {coin}: Waiting for more vault data points to calculate average...")
 
     except Exception as e:
         st.error(f"System Operational Error: {e}")
@@ -93,7 +104,6 @@ with tab2:
     try:
         ledger = penny.get_firm_ledger()
         if ledger:
-            # Multi-Asset Pricing Logic
             prices_now = {
                 "Bitcoin": george.scout_live_price("Bitcoin") or 70000.0,
                 "Ethereum": george.scout_live_price("Ethereum") or 2500.0,
@@ -111,7 +121,6 @@ with tab2:
 
             st.divider()
             st.subheader("📜 Master Accounting Ledger")
-            # Using width="stretch" per 2025 Streamlit standards
-            st.dataframe(ledger['trades_df'].sort_index(ascending=False), width="stretch")
+            st.dataframe(ledger['trades_df'].sort_index(ascending=False), use_container_width=True)
     except Exception as e:
         st.error(f"Accounting Office Error: {e}")
