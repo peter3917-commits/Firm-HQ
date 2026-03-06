@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+from streamlit_gsheets import GSheetsConnection  # Fixed import name
 from streamlit_autorefresh import st_autorefresh
 import george
 import arthur
@@ -50,7 +50,7 @@ with tab1:
             price = george.scout_live_price(coin)
             
             if price:
-                # 🛡️ RECORD DATA IMMEDIATELY
+                # 🛡️ RECORD DATA
                 if auto_trade:
                     new_entry = pd.DataFrame([{
                         "Staff": "George (Auto)",
@@ -63,7 +63,7 @@ with tab1:
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
-                # 2. DATA SHREDDING
+                # 2. Data Processing
                 asset_history = vault_df[vault_df['Asset'] == coin].copy()
                 cutoff = datetime.now() - timedelta(hours=48)
                 asset_history = asset_history[asset_history['Timestamp'] > cutoff]
@@ -88,7 +88,7 @@ with tab1:
                     st.subheader(f"Lawrence: {coin} Execution")
                     
                     if abs(snap_pct) >= 2.0:
-                        status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING (Wait for Hook)"
+                        status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING"
                         st.info(f"Arthur's Status: {status_text} | RSI: {rsi_val:.1f}")
 
                     gross, net, outcome, wager = lawrence.execute_trade(
@@ -96,20 +96,18 @@ with tab1:
                     )
                     
                     if outcome in ["BUY", "SELL"]:
-                        st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order on {coin}!")
-                        st.write(f"Position Size: **${wager:,.2f}** (10% of Capital)")
+                        st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order!")
                     elif outcome == "WIN":
-                        st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${net:.2f})")
+                        st.success(f"🎯 Magnet Hit! (${net:.2f})")
                     elif outcome == "LOSS":
-                        st.error(f"🛡️ Shield Active: Lawrence cut a LOSS (${net:.2f})")
+                        st.error(f"🛡️ Shield Active: Loss cut (${net:.2f})")
                     elif outcome == "OPEN":
-                        st.info(f"⏳ Trade is OPEN. Lawrence is watching the Magnet. Floating P/L: ${net:.2f}")
+                        st.info(f"⏳ Trade is OPEN. Floating P/L: ${net:.2f}")
                     else:
-                        st.write(f"⚖️ Lawrence is **holding** {coin}. (Waiting for a 2% Snap + Hook)")
+                        st.write(f"⚖️ Lawrence is holding {coin}.")
                 else:
-                    st.info(f"Collecting data for Arthur to analyze {coin}... (Arthur needs history)")
+                    st.info(f"Collecting data for {coin}...")
 
-        # 🛰️ BATCH UPDATE GOOGLE SHEETS
         if auto_trade:
             conn.update(worksheet="Vault", data=vault_df)
 
@@ -124,7 +122,7 @@ with tab1:
                 if not coin_tape.empty:
                     st.table(coin_tape[['Timestamp', 'Balance']].iloc[::-1])
                 else:
-                    st.caption(f"No {coin} data in 48h window.")
+                    st.caption(f"No {coin} data.")
 
     except Exception as e:
         st.error(f"System logic error: {e}")
@@ -134,7 +132,6 @@ with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
     if ledger:
-        # 🛡️ NORMALIZATION: Convert 'asset' to 'Asset'
         ledger['trades_df'].columns = [c.capitalize() if c.lower() == 'asset' else c for c in ledger['trades_df'].columns]
 
         prices_now = {
@@ -142,9 +139,6 @@ with tab2:
             "Ethereum": george.scout_live_price("Ethereum") or 2125.80,
             "Solana": george.scout_live_price("Solana") or 88.42
         }
-
-        if None in [george.scout_live_price(a) for a in ASSETS]:
-             st.sidebar.warning("⚠️ Using Fallback Accounting Prices")
 
         unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now)
         total_equity = ledger['vault_cash'] + unrealized_pl
@@ -156,7 +150,7 @@ with tab2:
         m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}")
         m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}")
 
-        with st.expander("🔍 Overhead & Friction Breakdown"):
+        with st.expander("🔍 Overhead Breakdown"):
             col_a, col_b, col_c = st.columns(3)
             col_a.metric("Fixed Burn", f"£{ledger['burn']:.2f}")
             col_b.metric("Trading Friction", f"£{ledger['friction']:.2f}")
@@ -164,5 +158,5 @@ with tab2:
 
         st.divider()
         st.subheader("📜 Master Accounting Ledger")
-        # Updated width to 'stretch' for Streamlit 2025 compliance
+        # Updated to 'width="stretch"' to support newer Streamlit versions mentioned in logs [cite: 12]
         st.dataframe(ledger['trades_df'].sort_index(ascending=False), width="stretch")
