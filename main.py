@@ -63,7 +63,7 @@ with tab1:
                 st.divider()
                 st.header(f"🛰️ Sector: {coin}")
                 
-                # 2. DATA SHREDDING
+                # 2. DATA SHREDDING (Updated to filter by the current 'coin' in the loop)
                 asset_history = vault_df[vault_df['Asset'] == coin].copy()
                 cutoff = datetime.now() - timedelta(hours=48)
                 asset_history = asset_history[asset_history['Timestamp'] > cutoff]
@@ -124,7 +124,7 @@ with tab1:
                 if not coin_tape.empty:
                     st.table(coin_tape[['Timestamp', 'Balance']].iloc[::-1])
                 else:
-                    st.caption("No data in 48h window.")
+                    st.caption(f"No {coin} data in 48h window.")
 
     except Exception as e:
         st.error(f"System logic error: {e}")
