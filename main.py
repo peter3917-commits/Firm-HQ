@@ -47,8 +47,7 @@ with tab1:
             price = george.scout_live_price(coin)
             
             if price:
-                # 🛡️ FIX 1: RECORD DATA IMMEDIATELY
-                # This ensures George records ETH and SOL even before Arthur is ready
+                # 🛡️ RECORD DATA IMMEDIATELY
                 if auto_trade:
                     new_entry = pd.DataFrame([{
                         "Staff": "George (Auto)",
@@ -70,7 +69,7 @@ with tab1:
                 # 3. Arthur's Analysis
                 moving_avg, snap_pct, rsi_val, hook_found = arthur.check_for_snap(coin, price, history_for_arthur)
                 
-                # 4. Market Intel (RETORED ORIGINAL UI)
+                # 4. Market Intel
                 st.subheader(f"Market Intel: {coin}")
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(f"Live {coin}", f"${price:,.2f}")
@@ -81,7 +80,7 @@ with tab1:
                     col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
                     col4.metric("RSI (14)", f"{rsi_val:.1f}")
                     
-                    # --- 🏛️ LAWRENCE'S TRADING FLOOR (RESTORED ORIGINAL UI) ---
+                    # --- 🏛️ LAWRENCE'S TRADING FLOOR ---
                     st.divider()
                     st.subheader(f"Lawrence: {coin} Execution")
                     
@@ -111,7 +110,7 @@ with tab1:
         if auto_trade:
             conn.update(worksheet="Vault", data=vault_df)
 
-        # 7. THE TRI-TAPE (3 Tables)
+        # 7. THE TRI-TAPE
         st.divider()
         st.subheader("📊 Sector Tapes (Last 5 Entries)")
         t_col1, t_col2, t_col3 = st.columns(3)
@@ -132,27 +131,25 @@ with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
     if ledger:
-        # 🛡️ FIX 2: MULTI-ASSET ACCOUNTING
-        # Instead of just BTC price, we calculate based on the actual asset in the trade
-        prices_now = {a: george.scout_live_price(a) for a in ASSETS}
+        # 🛡️ UPDATED RESILIENCE LOGIC
+        # We try to get the price, but if George fails, we use a fallback to keep Penny alive
+        btc_price = george.scout_live_price("Bitcoin")
         
-        # Check if we have at least Bitcoin price to run basic equity check
-        if prices_now["Bitcoin"] is not None:
-            # Note: You may want to update penny.calculate_unrealized to handle a dictionary of prices
-            # For now, we use Bitcoin as the primary equity benchmark as per your old code
-            unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now["Bitcoin"])
-            total_equity = ledger['vault_cash'] + unrealized_pl
-            
-            st.subheader("Capital & Reserves")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Float")
-            m2.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
-            m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}")
-            m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}")
-        else:
-            st.warning("⚠️ Market feed interrupted. Calculations paused to prevent errors.")
-            st.subheader("Capital & Reserves (Static)")
-            st.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
+        # Fallback to the last known market price from 11:30am if API fails
+        if btc_price is None:
+             btc_price = 70538.88 
+             st.sidebar.warning("⚠️ Using Fallback Accounting Price")
+
+        # Now Penny can run her math without crashing
+        unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], btc_price)
+        total_equity = ledger['vault_cash'] + unrealized_pl
+        
+        st.subheader("Capital & Reserves")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Float")
+        m2.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
+        m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}")
+        m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}")
 
         with st.expander("🔍 Overhead & Friction Breakdown"):
             col_a, col_b, col_c = st.columns(3)
