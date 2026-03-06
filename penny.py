@@ -22,16 +22,12 @@ def get_firm_ledger():
     gross_realized = closed_trades['profit_usd'].sum()
     
     # 2. Transactional Friction (Fees + Slippage)
-    # Every trade entry/exit costs us. We apply this to all trades logged.
     total_volume = trades_df['wager'].sum() 
-    # Note: Realistically, volume is doubled for closed trades (entry + exit)
     friction = total_volume * (EXCHANGE_FEE_PCT + SLIPPAGE_PCT)
     
     # 3. Operational Burn (Monthly Costs)
-    # We check the overheads file or create it
     burn_total = 0.0
     if not os.path.exists('overheads.csv'):
-        # First-time setup: Log initial monthly costs
         burn_df = pd.DataFrame([{
             "date": datetime.now().strftime('%Y-%m-%d'),
             "category": "Fixed",
@@ -63,17 +59,28 @@ def get_firm_ledger():
     }
 
 def calculate_unrealized(trades_df, current_price):
-    """Calculates the live value of trades currently in the field."""
+    """
+    Calculates the HONEST liquidated value of trades.
+    Uses Bid/Ask spread so you see what you'd actually walk away with.
+    """
+    # Simulate the exit prices
+    bid_price = current_price * 0.9999  # What you get if you SELL
+    ask_price = current_price * 1.0001  # What you pay to BUY back
+    
     open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
     unrealized_pl = 0.0
     
     for idx, row in open_trades.iterrows():
         entry = row['price']
         wager = row['wager']
+        
         if row['type'] == "BUY":
-            diff = ((current_price - entry) / entry) * wager
-        else: # SELL
-            diff = ((entry - current_price) / entry) * wager
+            # If you are long, you must exit at the lower BID price
+            diff = ((bid_price - entry) / entry) * wager
+        else: 
+            # If you are short, you must buy back at the higher ASK price
+            diff = ((entry - ask_price) / entry) * wager
+            
         unrealized_pl += diff
         open_trades.at[idx, 'floating_pl'] = diff
         
