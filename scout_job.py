@@ -18,8 +18,8 @@ except Exception as e:
     print(f"❌ Auth Error: {e}")
     exit(1)
 
-def fetch_coinbase_candles(start_time):
-    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
+def fetch_coinbase_candles(product_id, start_time):
+    url = f"https://api.exchange.coinbase.com/products/{product_id}/candles"
     params = {
         'granularity': 300,
         'start': start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -37,6 +37,9 @@ raw_data = sheet.get_all_records()
 df = pd.DataFrame(raw_data)
 
 if not df.empty:
+    # 🛡️ THE NORMALIZATION SHIELD (Fixed the KeyError: 'Asset')
+    df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in df.columns]
+    
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     last_ts = df['Timestamp'].max()
 else:
@@ -46,40 +49,50 @@ else:
 now = datetime.utcnow()
 gap_minutes = (now - last_ts).total_seconds() / 60
 
-# We check for gaps over 6 minutes to avoid unnecessary calls during normal heartbeats
+# --- MULTI-ASSET GAP FILL ---
+ASSETS = {"Bitcoin": "BTC-USD", "Ethereum": "ETH-USD", "Solana": "SOL-USD"}
+
 if gap_minutes > 6:
-    print(f"🕵️ George found a {int(gap_minutes)} min gap. Patching...")
-    history = fetch_coinbase_candles(last_ts)
-    if not history.empty:
-        history['Timestamp'] = pd.to_datetime(history['ts'], unit='s')
-        history['Balance'] = history['close']
-        history['Staff'] = "George (Gap-Fill)"
-        history['Asset'] = "Bitcoin"
-        df = pd.concat([df, history[['Staff', 'Timestamp', 'Asset', 'Balance']]], ignore_index=True)
+    print(f"🕵️ George found a {int(gap_minutes)} min gap. Patching sectors...")
+    for asset_name, product_id in ASSETS.items():
+        history = fetch_coinbase_candles(product_id, last_ts)
+        if not history.empty:
+            history['Timestamp'] = pd.to_datetime(history['ts'], unit='s')
+            history['Balance'] = history['close']
+            history['Staff'] = "George (Gap-Fill)"
+            history['Asset'] = asset_name
+            df = pd.concat([df, history[['Staff', 'Timestamp', 'Asset', 'Balance']]], ignore_index=True)
 
-# Add current spot price
-try:
-    live = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot").json()
-    live_row = pd.DataFrame([{
-        "Staff": "George (Background)", 
-        "Timestamp": now, 
-        "Asset": "Bitcoin", 
-        "Balance": float(live['data']['amount'])
-    }])
-    df = pd.concat([df, live_row], ignore_index=True)
-except:
-    pass
+# Add current spot prices for all assets
+for asset_name, product_id in ASSETS.items():
+    try:
+        live = requests.get(f"https://api.coinbase.com/v2/prices/{product_id}/spot").json()
+        live_row = pd.DataFrame([{
+            "Staff": "George (Background)", 
+            "Timestamp": now, 
+            "Asset": asset_name, 
+            "Balance": float(live['data']['amount'])
+        }])
+        df = pd.concat([df, live_row], ignore_index=True)
+    except:
+        pass
 
-df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
+df = df.drop_duplicates(subset=['Timestamp', 'Asset']).sort_values('Timestamp')
 
-# B. ARTHUR: ANALYZE
-df['Balance'] = pd.to_numeric(df['Balance'])
-magnet = df['Balance'].tail(576).mean()
-current_price = float(df['Balance'].iloc[-1])
-snap_pct = ((current_price - magnet) / magnet) * 100
-
-# C. LAWRENCE: EXECUTE
-gross, net, result, wager = lawrence.execute_trade("BTC", current_price, magnet)
+# B. ARTHUR & LAWRENCE: SECTOR ANALYSIS
+# We process each asset individually so Lawrence can check his trades for each
+for asset_name in ASSETS.keys():
+    asset_df = df[df['Asset'] == asset_name].copy()
+    if not asset_df.empty:
+        asset_df['Balance'] = pd.to_numeric(asset_df['Balance'])
+        magnet = asset_df['Balance'].tail(576).mean()
+        current_price = float(asset_df['Balance'].iloc[-1])
+        
+        # C. LAWRENCE: EXECUTE (Now calling with the corrected asset name)
+        # Using the mapping to ensure we pass the same asset tag as main.py
+        gross, net, result, wager = lawrence.execute_trade(asset_name, current_price, magnet)
+        
+        print(f"Sect: {asset_name} | Price: ${current_price:,.2f} | Magnet: ${magnet:,.2f} | Law: {result}")
 
 # D. SHRED & HIGH-SPEED SYNC
 cutoff = datetime.utcnow() - timedelta(hours=48)
@@ -89,20 +102,9 @@ if not df.empty:
     df_sync = df[['Staff', 'Timestamp', 'Asset', 'Balance']].copy()
     df_sync['Timestamp'] = df_sync['Timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
     
-    # NEW: The "Traffic-Jam" Fix. We overwrite starting at A1 in one single batch.
     data_to_save = [df_sync.columns.values.tolist()] + df_sync.values.tolist()
     try:
-        # sheet.clear() is removed to save time/API calls
         sheet.update(range_name='A1', values=data_to_save)
         print("✅ Vault synchronized successfully.")
     except Exception as e:
         print(f"⚠️ Vault sync delay: {e}")
-
-# --- THE FIRM'S LOG ---
-print("-" * 30)
-print(f"🏛️ Firm Heartbeat | {datetime.now().strftime('%H:%M:%S')}")
-print(f"📈 Price: ${current_price:,.2f} | Magnet: ${magnet:,.2f}")
-print(f"⚡ Snap: {snap_pct:.2f}%")
-print(f"📢 Lawrence says: {result} | Wager: ${wager:.2f}")
-print(f"💰 Net Profit: ${net:.2f}")
-print("-" * 30)
