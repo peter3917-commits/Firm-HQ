@@ -2,10 +2,10 @@ import pandas as pd
 import os
 from datetime import datetime
 
-def execute_trade(asset, current_price, average, rsi=None, hook_detected=False):
+def execute_trade(asset, current_price, average, rsi=None, prev_price=None):
     """
     Lawrence 2.0: High-Volatility Execution Specialist.
-    Logic: 2% Snap Trigger | 0.5% Stop-Loss | 50% Target Win Rate.
+    FIXED: Argument names matched to main.py to prevent 'unexpected keyword' errors.
     """
     
     # --- CAPITAL MANAGEMENT ---
@@ -34,12 +34,10 @@ def execute_trade(asset, current_price, average, rsi=None, hook_detected=False):
             trade_type = df.at[idx, 'type']
             
             # Calculate current performance
-            # For BUY: (Price - Entry) | For SELL: (Entry - Price)
             diff_pct = ((current_price - entry_price) / entry_price) * 100
             if trade_type == "SELL": diff_pct = -diff_pct
             
-            # CHECK FOR WIN: Price has returned to the 48h Average (Magnet)
-            # We use a small 0.1% buffer to ensure the trade closes smoothly
+            # EXIT LOGIC: Target (Magnet) or Shield (Stop Loss)
             hit_magnet = (trade_type == "BUY" and current_price >= average) or \
                          (trade_type == "SELL" and current_price <= average)
 
@@ -51,7 +49,6 @@ def execute_trade(asset, current_price, average, rsi=None, hook_detected=False):
                 df.to_csv('trades.csv', index=False)
                 return profit, profit, "WIN", WAGER_SIZE
 
-            # CHECK FOR LOSS: Price hit the 0.5% Shield
             elif diff_pct <= -STOP_LOSS_PCT:
                 result = "LOSS"
                 profit = -(WAGER_SIZE * (STOP_LOSS_PCT / 100))
@@ -60,7 +57,6 @@ def execute_trade(asset, current_price, average, rsi=None, hook_detected=False):
                 df.to_csv('trades.csv', index=False)
                 return profit, profit, "LOSS", WAGER_SIZE
             
-            # STILL OPEN: Calculate floating P/L for the dashboard
             else:
                 floating_pl = WAGER_SIZE * (diff_pct / 100)
                 return 0.0, floating_pl, "OPEN", WAGER_SIZE
@@ -68,16 +64,15 @@ def execute_trade(asset, current_price, average, rsi=None, hook_detected=False):
     # --- 2. NEW TRADE ANALYSIS (THE JURY) ---
     snap_pct = ((current_price - average) / average) * 100
     
-    # Criteria for a BUY:
-    # 1. Price is 2% below average
-    # 2. Arthur sees a 'Hook' (Price turned up)
-    # 3. RSI is below 35 (Oversold condition)
+    # Calculate 'The Hook' from the prev_price provided by main.py
+    hook_detected = False
+    if prev_price is not None and current_price > prev_price:
+        hook_detected = True
+    
+    # Criteria for a BUY: 2% Snap + Hook Detected + RSI Oversold (<35)
     can_buy = (snap_pct <= -TRIGGER_THRESHOLD) and hook_detected and (rsi is not None and rsi < 35)
     
-    # Criteria for a SELL:
-    # 1. Price is 2% above average
-    # 2. Arthur sees a 'Hook' (Price turned down)
-    # 3. RSI is above 65 (Overbought condition)
+    # Criteria for a SELL: 2% Snap + Price not hooking + RSI Overbought (>65)
     can_sell = (snap_pct >= TRIGGER_THRESHOLD) and (not hook_detected) and (rsi is not None and rsi > 65)
 
     trade_action = "WAITING"
