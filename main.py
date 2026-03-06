@@ -59,7 +59,8 @@ with tab1:
                 # 3. Arthur's Analysis
                 moving_avg, snap_pct, rsi_val, hook_found = arthur.check_for_snap(coin, price, history_for_arthur)
                 
-                # 4. Market Metrics Display
+                # 4. Market Intel (RETORED ORIGINAL UI)
+                st.subheader(f"Market Intel: {coin}")
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(f"Live {coin}", f"${price:,.2f}")
                 
@@ -69,7 +70,10 @@ with tab1:
                     col3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
                     col4.metric("RSI (14)", f"{rsi_val:.1f}")
                     
-                    # 5. Lawrence's Execution
+                    # --- 🏛️ LAWRENCE'S TRADING FLOOR (RESTORED ORIGINAL UI) ---
+                    st.divider()
+                    st.subheader(f"Lawrence: {coin} Execution")
+                    
                     if abs(snap_pct) >= 2.0:
                         status_text = "🪝 HOOK DETECTED" if hook_found else "🔪 FALLING (Wait for Hook)"
                         st.info(f"Arthur's Status: {status_text} | RSI: {rsi_val:.1f}")
@@ -80,8 +84,15 @@ with tab1:
                     
                     if outcome in ["BUY", "SELL"]:
                         st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order on {coin}!")
+                        st.write(f"Position Size: **${wager:,.2f}** (10% of Capital)")
+                    elif outcome == "WIN":
+                        st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${net:.2f})")
+                    elif outcome == "LOSS":
+                        st.error(f"🛡️ Shield Active: Lawrence cut a LOSS (${net:.2f})")
                     elif outcome == "OPEN":
-                        st.info(f"⏳ {coin} trade is OPEN. Floating P/L: ${net:.2f}")
+                        st.info(f"⏳ Trade is OPEN. Lawrence is watching the Magnet. Floating P/L: ${net:.2f}")
+                    else:
+                        st.write(f"⚖️ Lawrence is **holding** {coin}. (Waiting for a 2% Snap + Hook)")
                     
                     # 6. Recording Logic
                     if auto_trade:
@@ -98,17 +109,15 @@ with tab1:
         if auto_trade:
             conn.update(worksheet="Vault", data=vault_df)
 
-        # 7. THE TRI-TAPE
+        # 7. THE TRI-TAPE (3 Tables)
         st.divider()
         st.subheader("📊 Sector Tapes (Last 5 Entries)")
         t_col1, t_col2, t_col3 = st.columns(3)
-        
         for coin, t_col in zip(ASSETS, [t_col1, t_col2, t_col3]):
             with t_col:
                 st.write(f"**{coin}**")
                 coin_tape = vault_df[vault_df['Asset'] == coin].tail(5).copy()
                 if not coin_tape.empty:
-                    coin_tape['Timestamp'] = coin_tape['Timestamp'].dt.strftime('%H:%M:%S')
                     st.table(coin_tape[['Timestamp', 'Balance']].iloc[::-1])
                 else:
                     st.caption("No data in 48h window.")
@@ -120,27 +129,25 @@ with tab1:
 with tab2:
     st.title("🧾 The Accounting Office")
     ledger = penny.get_firm_ledger()
-    
     if ledger:
-        # 🛡️ DEFENSIVE ACCOUNTING: Handle George API failure
+        # 🛡️ DEFENSIVE FIX: Check price before math
         btc_price = george.scout_live_price("Bitcoin")
         
-        if btc_price:
+        if btc_price is not None:
             unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], btc_price)
+            total_equity = ledger['vault_cash'] + unrealized_pl
+            
+            st.subheader("Capital & Reserves")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Float")
+            m2.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
+            m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}")
+            m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}")
         else:
-            # Fallback if API is down
-            unrealized_pl = 0.0
-            open_df = ledger['trades_df'][ledger['trades_df']['result'] == 'OPEN'].copy()
-            st.warning("⚠️ Market data feed interrupted. Floating P/L calculations are paused.")
-        
-        total_equity = ledger['vault_cash'] + unrealized_pl
-        
-        st.subheader("Capital & Reserves")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Float")
-        m2.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
-        m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}")
-        m4.metric("Tax Pot", f"£{ledger['tax_pot']:,.2f}")
+            st.warning("⚠️ Market feed interrupted. Calculations paused to prevent errors.")
+            # Show static ledger data even if price is missing
+            st.subheader("Capital & Reserves (Static)")
+            st.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
 
         with st.expander("🔍 Overhead & Friction Breakdown"):
             col_a, col_b, col_c = st.columns(3)
@@ -149,11 +156,5 @@ with tab2:
             col_c.metric("Realized P/L", f"£{ledger['gross_realized']:,.2f}")
 
         st.divider()
-        st.subheader("🔭 Live Exposure Inventory")
-        if not open_df.empty:
-            st.dataframe(open_df.sort_index(ascending=False), use_container_width=True)
-        else:
-            st.info("No active exposure.")
-
         st.subheader("📜 Master Accounting Ledger")
         st.dataframe(ledger['trades_df'].sort_index(ascending=False), use_container_width=True)
