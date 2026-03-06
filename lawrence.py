@@ -32,8 +32,13 @@ def execute_trade(asset, current_price, average, rsi=None, prev_price=None):
     if os.path.exists('trades.csv'):
         df = pd.read_csv('trades.csv')
         if not df.empty:
-            # 🛡️ THE FIX: Only look for open trades matching THIS specific asset
+            # 🛡️ THE NORMALIZATION SHIELD: Fixes the KeyError in GitHub Actions
+            # This converts 'asset' -> 'Asset' automatically if the CSV is old.
+            df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in df.columns]
+
+            # 🛡️ This line will now work perfectly even if the file had lowercase 'asset'
             mask = (df['result'] == 'OPEN') & (df['Asset'] == asset)
+            
             if mask.any():
                 idx = df[mask].index[-1]
                 entry_price = df.at[idx, 'price']
@@ -86,7 +91,7 @@ def execute_trade(asset, current_price, average, rsi=None, prev_price=None):
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         execution_price = ask_price if trade_action == "BUY" else bid_price
         
-        # 🛡️ THE FIX: Use 'Asset' with a capital A to match Penny's requirements
+        # 🛡️ Ensuring NEW trades always use Capital 'Asset'
         new_trade = pd.DataFrame([[ts, asset, trade_action, float(execution_price), WAGER_SIZE, "OPEN", 0.0]], 
                                    columns=['timestamp','Asset','type','price','wager', 'result','profit_usd'])
         
