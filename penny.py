@@ -59,35 +59,40 @@ def get_firm_ledger():
         "trades_df": trades_df
     }
 
-def calculate_unrealized(trades_df, current_price):
+def calculate_unrealized(trades_df, prices_dict):
     """
-    Calculates the HONEST liquidated value of trades.
-    Uses Bid/Ask spread so you see what you'd actually walk away with.
+    Calculates the HONEST liquidated value of trades across multiple sectors.
+    prices_dict: Expects a dict like {'Bitcoin': 70000, 'Ethereum': 2100, etc.}
     """
-    # 🛡️ THE FIX: SAFETY GUARD
-    # If George fails to find a price, we return 0.0 instead of crashing.
-    if current_price is None:
-        open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
-        if not open_trades.empty:
-            open_trades['floating_pl'] = 0.0
-        return 0.0, open_trades
-
-    # Simulate the exit prices
-    bid_price = current_price * 0.9999  # What you get if you SELL
-    ask_price = current_price * 1.0001  # What you pay to BUY back
-    
     open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
     unrealized_pl = 0.0
     
+    if open_trades.empty:
+        return 0.0, open_trades
+
     for idx, row in open_trades.iterrows():
+        # Get the asset name for this specific trade
+        asset = row.get('Asset', 'Bitcoin') 
+        
+        # Pull the specific live price for this asset
+        current_price = prices_dict.get(asset)
+
+        if current_price is None:
+            open_trades.at[idx, 'floating_pl'] = 0.0
+            continue
+
+        # Simulate the exit prices (Spread)
+        bid_price = current_price * 0.9999  # Exit price for SELLing a BUY
+        ask_price = current_price * 1.0001  # Exit price for BUYing back a SHORT
+        
         entry = row['price']
         wager = row['wager']
         
         if row['type'] == "BUY":
-            # If you are long, you must exit at the lower BID price
+            # If long, profit = (Exit Price - Entry) / Entry * Wager
             diff = ((bid_price - entry) / entry) * wager
         else: 
-            # If you are short, you must buy back at the higher ASK price
+            # If short, profit = (Entry - Exit Price) / Entry * Wager
             diff = ((entry - ask_price) / entry) * wager
             
         unrealized_pl += diff
