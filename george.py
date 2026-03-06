@@ -1,27 +1,36 @@
 import requests
 
-def scout_live_price(asset_name="Bitcoin"):
+def scout_live_price(coin):
     """
-    George 2.0: Multi-Asset Scout.
-    Mapping display names to CoinGecko IDs to ensure the Vault remains clean.
+    George's improved scouting logic. 
+    Connects to the market to fetch real-time USD prices.
     """
-    # Map your Vault names to the API's required IDs
-    ticker_map = {
+    # 🎯 Internal Mapping: Link your names to the market IDs
+    coin_map = {
         "Bitcoin": "bitcoin",
         "Ethereum": "ethereum",
         "Solana": "solana"
     }
     
-    # Default to bitcoin if the name isn't in our map
-    api_id = ticker_map.get(asset_name, "bitcoin")
+    # Get the correct ID for the API
+    market_id = coin_map.get(coin)
+    
+    if not market_id:
+        return None
 
     try:
-        # Fetching price from CoinGecko API
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={api_id}&vs_currencies=usd"
+        # George calls the simple price endpoint
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={market_id}&vs_currencies=usd"
         response = requests.get(url, timeout=10)
-        data = response.json()
         
-        # Extract price using the API ID
-        return float(data[api_id]['usd'])
-    except Exception:
+        if response.status_code == 200:
+            data = response.json()
+            # Extract the price from the nested JSON
+            price = data[market_id]['usd']
+            return float(price)
+        else:
+            return None
+            
+    except Exception as e:
+        # If the scout hits a wall, return None so the Sentinel can skip safely
         return None
