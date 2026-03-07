@@ -18,7 +18,11 @@ def get_firm_ledger():
     trades_df = pd.read_csv('trades.csv')
     
     # 1. Calculate Realized Trade Profit
-    closed_trades = trades_df[trades_df['result'].isin(['WIN', 'LOSS'])].copy()
+    # Updated to include new Exit Labels: WIN_MOONSHOT and WIN_TRAILING
+    win_labels = ['WIN', 'WIN_MOONSHOT', 'WIN_TRAILING']
+    all_closed_labels = win_labels + ['LOSS']
+    
+    closed_trades = trades_df[trades_df['result'].isin(all_closed_labels)].copy()
     gross_realized = closed_trades['profit_usd'].sum()
     
     # 2. Transactional Friction (Fees + Slippage)
@@ -42,7 +46,8 @@ def get_firm_ledger():
         burn_total = abs(burn_df['amount'].sum())
 
     # 4. The Tax Pot (Locked Profit)
-    wins = trades_df[trades_df['result'] == 'WIN']
+    # Updated to ensure all types of Wins are taxed/reserved
+    wins = trades_df[trades_df['result'].isin(win_labels)]
     tax_pot = wins['profit_usd'].sum() * PROFIT_TAX_PCT
     
     # 5. Final Calculations
