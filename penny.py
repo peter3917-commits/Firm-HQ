@@ -10,17 +10,66 @@ MONTHLY_VPS_COST = 15.00
 MONTHLY_DATA_COST = 10.00
 PROFIT_TAX_PCT = 0.20     # 20% Reserve on Wins
 
-def get_firm_ledger():
+def cleanup_legacy_trades(trades_df, prices_dict):
+    """
+    Penny's Housekeeping: Detects multiple open trades for the same asset.
+    It keeps only the NEWEST trade active and closes the rest as 'LEGACY_CLEANUP'.
+    """
+    if trades_df.empty:
+        return trades_df
+
+    # Standardize column names for processing
+    trades_df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in trades_df.columns]
+    
+    open_mask = trades_df['result'] == 'OPEN'
+    assets_with_open_trades = trades_df[open_mask]['Asset'].unique()
+
+    for asset in assets_with_open_trades:
+        asset_mask = (trades_df['Asset'] == asset) & (trades_df['result'] == 'OPEN')
+        open_positions = trades_df[asset_mask]
+
+        if len(open_positions) > 1:
+            # Sort by timestamp to find the latest one
+            open_positions = open_positions.sort_values(by='timestamp', ascending=False)
+            latest_idx = open_positions.index[0]
+            legacy_indices = open_positions.index[1:]
+
+            current_price = prices_dict.get(asset)
+            
+            for idx in legacy_indices:
+                entry = trades_df.at[idx, 'price']
+                wager = trades_df.at[idx, 'wager']
+                
+                # Calculate final P/L for the legacy trade to clear the books
+                if current_price:
+                    exit_price = current_price * 0.9999 # Bid price
+                    pnl = ((exit_price - entry) / entry) * wager
+                else:
+                    pnl = 0.0 # Safety fallback
+                
+                trades_df.at[idx, 'result'] = 'LEGACY_CLEANUP'
+                trades_df.at[idx, 'profit_usd'] = pnl
+                print(f"🧹 PENNY: Cleaning up legacy {asset} trade from {trades_df.at[idx, 'timestamp']}. P/L: ${pnl:.2f}")
+
+    return trades_df
+
+def get_firm_ledger(prices_dict=None):
     """Penny's core logic: Calculates the true state of the Firm."""
     if not os.path.exists('trades.csv'):
         return None
     
     trades_df = pd.read_csv('trades.csv')
     
+    # --- NEW: Housekeeping Step ---
+    # Removes the 7 legacy trades and consolidates to one active position per asset
+    if prices_dict:
+        trades_df = cleanup_legacy_trades(trades_df, prices_dict)
+        trades_df.to_csv('trades.csv', index=False)
+
     # 1. Calculate Realized Trade Profit
-    # Updated to include new Exit Labels: WIN_MOONSHOT and WIN_TRAILING
+    # Added LEGACY_CLEANUP to realized totals so the Vault stays balanced
     win_labels = ['WIN', 'WIN_MOONSHOT', 'WIN_TRAILING']
-    all_closed_labels = win_labels + ['LOSS']
+    all_closed_labels = win_labels + ['LOSS', 'LEGACY_CLEANUP']
     
     closed_trades = trades_df[trades_df['result'].isin(all_closed_labels)].copy()
     gross_realized = closed_trades['profit_usd'].sum()
@@ -32,7 +81,6 @@ def get_firm_ledger():
     # 3. Operational Burn (Monthly Costs)
     burn_total = 0.0
     if not os.path.exists('overheads.csv'):
-        # First-time setup: Log initial monthly costs
         burn_df = pd.DataFrame([{
             "date": datetime.now().strftime('%Y-%m-%d'),
             "category": "Fixed",
@@ -46,7 +94,6 @@ def get_firm_ledger():
         burn_total = abs(burn_df['amount'].sum())
 
     # 4. The Tax Pot (Locked Profit)
-    # Updated to ensure all types of Wins are taxed/reserved
     wins = trades_df[trades_df['result'].isin(win_labels)]
     tax_pot = wins['profit_usd'].sum() * PROFIT_TAX_PCT
     
@@ -65,10 +112,7 @@ def get_firm_ledger():
     }
 
 def calculate_unrealized(trades_df, prices_dict):
-    """
-    Calculates the HONEST liquidated value of trades across multiple sectors.
-    prices_dict: Expects a dict like {'Bitcoin': 70000, 'Ethereum': 2100, etc.}
-    """
+    """Calculates the HONEST liquidated value of trades across multiple sectors."""
     open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
     unrealized_pl = 0.0
     
@@ -76,29 +120,18 @@ def calculate_unrealized(trades_df, prices_dict):
         return 0.0, open_trades
 
     for idx, row in open_trades.iterrows():
-        # Get the asset name for this specific trade
         asset = row.get('Asset', 'Bitcoin') 
-        
-        # Pull the specific live price for this asset
         current_price = prices_dict.get(asset)
 
         if current_price is None:
             open_trades.at[idx, 'floating_pl'] = 0.0
             continue
 
-        # Simulate the exit prices (Spread)
-        bid_price = current_price * 0.9999  # Exit price for SELLing a BUY
-        ask_price = current_price * 1.0001  # Exit price for BUYing back a SHORT
-        
+        bid_price = current_price * 0.9999 
         entry = row['price']
         wager = row['wager']
         
-        if row['type'] == "BUY":
-            # If long, profit = (Exit Price - Entry) / Entry * Wager
-            diff = ((bid_price - entry) / entry) * wager
-        else: 
-            # If short, profit = (Entry - Exit Price) / Entry * Wager
-            diff = ((entry - ask_price) / entry) * wager
+        diff = ((bid_price - entry) / entry) * wager
             
         unrealized_pl += diff
         open_trades.at[idx, 'floating_pl'] = diff
