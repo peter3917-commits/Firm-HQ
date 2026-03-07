@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 
-def calculate_rsi(prices, period=14):
+def calculate_rsi(prices, period=100):
     """Arthur's sense of 'Overstretched' markets using RSI logic."""
+    # Updated to 100 periods as requested
     if len(prices) < period + 1:
         return 50.0  # Neutral starting point
     
@@ -32,15 +33,16 @@ def check_for_snap(asset, current_price, history_df):
     if history_df.empty or price_col not in history_df.columns:
         return None, 0.0, 50.0, False
 
-    # 1. THE MAGNET (48h Moving Average)
-    # 48 hours * 12 pings/hour (5-min intervals) = 576 data points
-    moving_avg = history_df[price_col].tail(576).mean()
+    # 1. THE MAGNET (24h Moving Average)
+    # 24 hours * 12 pings/hour (5-min intervals) = 288 data points
+    moving_avg = history_df[price_col].tail(288).mean()
     
     # 2. THE SNAP (Distance from Magnet)
     snap_pct = ((current_price - moving_avg) / moving_avg) * 100
     
     # 3. THE FATIGUE (RSI Calculation)
-    rsi_value = calculate_rsi(history_df[price_col])
+    # Now calculating with 100 periods
+    rsi_value = calculate_rsi(history_df[price_col], period=100)
     
     # 4. THE PATIENCE (The Hook Detection)
     # Arthur looks at the previous 5-minute price to see if the bleeding stopped
@@ -48,8 +50,8 @@ def check_for_snap(asset, current_price, history_df):
     hook_detected = current_price > last_recorded_price
 
     # --- ARTHUR'S CONSOLE REPORT ---
-    # He only speaks up when things get interesting (2% threshold)
-    if abs(snap_pct) >= 2.0:
+    # Updated to reflect new strategy: 1.5% Snap and 35.0 RSI threshold
+    if abs(snap_pct) >= 1.5 and rsi_value < 35.0:
         status = "HOOKED 🪝" if hook_detected else "FALLING 🔪"
         print(f"🏛️ ARTHUR: {asset} is {snap_pct:.2f}% from Magnet | RSI: {rsi_value:.1f} | {status}")
     
