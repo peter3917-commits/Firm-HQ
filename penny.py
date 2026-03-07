@@ -16,7 +16,7 @@ def cleanup_legacy_trades(trades_df, prices_dict):
         return trades_df
 
     try:
-        # 1. DROP UNWANTED INDEX COLUMNS (The leading comma bug)
+        # 1. DROP UNWANTED INDEX COLUMNS
         unnamed_cols = [c for c in trades_df.columns if 'Unnamed' in c]
         if unnamed_cols:
             trades_df = trades_df.drop(columns=unnamed_cols)
@@ -40,10 +40,9 @@ def cleanup_legacy_trades(trades_df, prices_dict):
             open_positions = trades_df[asset_mask].sort_values(by='timestamp', ascending=False)
 
             if len(open_positions) > 1:
-                # Keep the newest [0], clean the rest [1:]
                 legacy_indices = open_positions.index[1:]
                 
-                # FIX: Handle "BTC" vs "Bitcoin" mapping
+                # Mapping symbols to names
                 current_price = prices_dict.get(asset) 
                 if not current_price and asset == "BTC": current_price = prices_dict.get("Bitcoin")
                 if not current_price and asset == "ETH": current_price = prices_dict.get("Ethereum")
@@ -61,7 +60,6 @@ def cleanup_legacy_trades(trades_df, prices_dict):
                     
                     trades_df.at[idx, 'result'] = 'LEGACY_CLEANUP'
                     trades_df.at[idx, 'profit_usd'] = pnl
-                    print(f"🧹 PENNY: Consolidated {asset} trade from {trades_df.at[idx, 'timestamp']}")
     except Exception as e:
         print(f"⚠️ PENNY ERROR DURING CLEANUP: {e}")
 
@@ -74,15 +72,12 @@ def get_firm_ledger(prices_dict=None):
     
     try:
         trades_df = pd.read_csv('trades.csv')
+        trades_df = cleanup_legacy_trades(trades_df, prices_dict or {})
         
-        # Run Housekeeping
-        trades_df = cleanup_legacy_trades(trades_df, prices_dict)
-        
-        # SAVE CLEAN VERSION (Wrapped in try/except to prevent Streamlit Cloud crashes)
         try:
             trades_df.to_csv('trades.csv', index=False)
         except:
-            pass # Continue even if disk is read-only
+            pass 
 
         # Calculate Totals
         win_labels = ['WIN', 'WIN_MOONSHOT', 'WIN_TRAILING']
@@ -96,19 +91,44 @@ def get_firm_ledger(prices_dict=None):
         
         burn_total = 0.0
         if os.path.exists('overheads.csv'):
-            burn_df = pd.read_csv('overheads.csv')
-            burn_total = abs(burn_df['amount'].sum())
+            try:
+                burn_df = pd.read_csv('overheads.csv')
+                burn_total = abs(burn_df['amount'].sum())
+            except:
+                pass
 
         wins = trades_df[trades_df['result'].isin(win_labels)]
         tax_pot = wins['profit_usd'].sum() * PROFIT_TAX_PCT
         vault_cash = INITIAL_CAPITAL + gross_realized - friction - burn_total
         tradable_balance = vault_cash - tax_pot
         
-        print(f"🏛️ PENNY: Ledger Synced. Vault: ${vault_cash:.2f}")
-
         return {
             "vault_cash": vault_cash,
             "tradable_balance": tradable_balance,
             "tax_pot": tax_pot,
             "friction": friction,
-            "burn": burn_
+            "burn": burn_total,
+            "trades_df": trades_df
+        }
+    except Exception as e:
+        print(f"⚠️ LEDGER ERROR: {e}")
+        return None
+
+def calculate_unrealized(trades_df, prices_dict):
+    """Penny's quick check on floating P/L."""
+    if trades_df is None or trades_df.empty or not prices_dict:
+        return 0.0, pd.DataFrame()
+        
+    unrealized_total = 0.0
+    open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
+    
+    for idx, row in open_trades.iterrows():
+        asset = row['asset']
+        current_price = prices_dict.get(asset)
+        if not current_price and asset == "Bitcoin": current_price = prices_dict.get("Bitcoin")
+        
+        if current_price:
+            perf = ((current_price - row['price']) / row['price'])
+            unrealized_total += (row['wager'] * perf)
+            
+    return unrealized_total, open_trades
