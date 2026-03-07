@@ -42,7 +42,12 @@ def cleanup_legacy_trades(trades_df, prices_dict):
             if len(open_positions) > 1:
                 # Keep the newest [0], clean the rest [1:]
                 legacy_indices = open_positions.index[1:]
-                current_price = prices_dict.get(asset) if prices_dict else None
+                
+                # FIX: Handle "BTC" vs "Bitcoin" mapping
+                current_price = prices_dict.get(asset) 
+                if not current_price and asset == "BTC": current_price = prices_dict.get("Bitcoin")
+                if not current_price and asset == "ETH": current_price = prices_dict.get("Ethereum")
+                if not current_price and asset == "SOL": current_price = prices_dict.get("Solana")
                 
                 for idx in legacy_indices:
                     entry = trades_df.at[idx, 'price']
@@ -73,8 +78,11 @@ def get_firm_ledger(prices_dict=None):
         # Run Housekeeping
         trades_df = cleanup_legacy_trades(trades_df, prices_dict)
         
-        # SAVE CLEAN VERSION (index=False prevents the extra comma bug)
-        trades_df.to_csv('trades.csv', index=False)
+        # SAVE CLEAN VERSION (Wrapped in try/except to prevent Streamlit Cloud crashes)
+        try:
+            trades_df.to_csv('trades.csv', index=False)
+        except:
+            pass # Continue even if disk is read-only
 
         # Calculate Totals
         win_labels = ['WIN', 'WIN_MOONSHOT', 'WIN_TRAILING']
@@ -103,29 +111,4 @@ def get_firm_ledger(prices_dict=None):
             "tradable_balance": tradable_balance,
             "tax_pot": tax_pot,
             "friction": friction,
-            "burn": burn_total,
-            "gross_realized": gross_realized,
-            "trades_df": trades_df
-        }
-    except Exception as e:
-        print(f"⚠️ PENNY ERROR DURING LEDGER GEN: {e}")
-        return None
-
-def calculate_unrealized(trades_df, prices_dict):
-    """Sentinel View Fixer. Ensures price data is mapped correctly."""
-    trades_df.columns = [c.lower().strip() for c in trades_df.columns]
-    open_trades = trades_df[trades_df['result'] == 'OPEN'].copy()
-    unrealized_pl = 0.0
-    
-    if open_trades.empty:
-        return 0.0, open_trades
-
-    for idx, row in open_trades.iterrows():
-        asset = row['asset']
-        price = prices_dict.get(asset)
-        if price:
-            diff = ((price * 0.9999 - row['price']) / row['price']) * row['wager']
-            unrealized_pl += diff
-            open_trades.at[idx, 'floating_pl'] = diff
-        
-    return unrealized_pl, open_trades
+            "burn": burn_
