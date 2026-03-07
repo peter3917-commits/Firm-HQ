@@ -86,13 +86,16 @@ with tab1:
                     if outcome in ["BUY", "SELL"]:
                         st.warning(f"🚀 Lawrence triggered a MAJOR **{outcome}** order on {coin}!")
                     elif outcome == "WIN":
-                        st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (${net:.2f})")
+                        st.success(f"🎯 Magnet Hit! Lawrence closed a WIN (£{net:.2f})")
+                    elif outcome == "WIN_MOONSHOT":
+                        st.success(f"🚀 MOONSHOT! Lawrence exited with maximum profit (£{net:.2f})")
+                    elif outcome == "WIN_TRAILING":
+                        st.success(f"📈 Trailing Exit! Lawrence exited on WMA 5 break (£{net:.2f})")
                     elif outcome == "OPEN":
-                        st.info(f"⏳ Trade is OPEN. Floating P/L: ${net:.2f}")
+                        st.info(f"⏳ Trade is OPEN. Floating P/L: £{net:.2f}")
                     else:
                         st.write(f"⚖️ Lawrence is holding {coin}.")
                 else:
-                    # This message appears if there isn't enough history in the last 72h
                     st.info(f"📡 {coin}: Waiting for more vault data points to calculate average...")
 
     except Exception as e:
@@ -102,18 +105,21 @@ with tab1:
 with tab2:
     st.title("🧾 The Accounting Office")
     try:
-        ledger = penny.get_firm_ledger()
+        # 1. Fetch live prices to allow Penny to perform Housekeeping/Cleanup
+        current_prices = {}
+        for c in ASSETS:
+            current_prices[c] = george.scout_live_price(c)
+
+        # 2. Get Ledger (Penny now performs cleanup of the 7 legacy trades here)
+        ledger = penny.get_firm_ledger(prices_dict=current_prices)
+        
         if ledger:
-            prices_now = {
-                "Bitcoin": george.scout_live_price("Bitcoin") or 70000.0,
-                "Ethereum": george.scout_live_price("Ethereum") or 2500.0,
-                "Solana": george.scout_live_price("Solana") or 100.0
-            }
-            
-            unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], prices_now)
+            # Re-calculate unrealized with the clean ledger
+            unrealized_pl, open_df = penny.calculate_unrealized(ledger['trades_df'], current_prices)
             total_equity = ledger['vault_cash'] + unrealized_pl
             
             m1, m2, m3, m4 = st.columns(4)
+            # Updated to width="stretch" to resolve deprecation warnings
             m1.metric("Total Equity", f"£{total_equity:,.2f}", delta=f"£{unrealized_pl:,.2f} Float")
             m2.metric("Vault Cash", f"£{ledger['vault_cash']:,.2f}")
             m3.metric("Tradable Balance", f"£{ledger['tradable_balance']:,.2f}")
@@ -121,6 +127,15 @@ with tab2:
 
             st.divider()
             st.subheader("📜 Master Accounting Ledger")
-            st.dataframe(ledger['trades_df'].sort_index(ascending=False), use_container_width=True)
+            
+            # 3. Final display fix: Replace use_container_width with width='stretch'
+            st.dataframe(
+                ledger['trades_df'].sort_index(ascending=False), 
+                width="stretch"
+            )
+            
+            if 'LEGACY_CLEANUP' in ledger['trades_df']['result'].values:
+                st.toast("🧹 Penny just cleaned up legacy ghost trades.", icon="🧹")
+                
     except Exception as e:
         st.error(f"Accounting Office Error: {e}")
