@@ -13,101 +13,83 @@ def calculate_wma(prices, period=5):
 def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     """
     Lawrence 3.0: Momentum-Reversal Execution.
-    Implements Fast Hook (EMA 5), 1.5% Snap, and Stage-2 Trailing Exit (WMA 5).
+    Identical logic to user version, armored for stability.
     """
-    
-    # --- INSTITUTIONAL SPREAD SIMULATION ---
-    ask_price = current_price * 1.0001  # Price you pay to BUY
-    bid_price = current_price * 0.9999  # Price you get when you SELL
-    
-    # --- CAPITAL MANAGEMENT ---
+    # --- INSTITUTIONAL SETTINGS ---
+    ask_price = current_price * 1.0001
+    bid_price = current_price * 0.9999
     TOTAL_BANK = 1000.0  
-    WAGER_SIZE = TOTAL_BANK * 0.10 # Strict 10% per trade
+    WAGER_SIZE = TOTAL_BANK * 0.10 
     
-    # --- STRATEGY SETTINGS ---
-    TRIGGER_THRESHOLD = 1.5  # New 1.5% Gap from Magnet
-    STOP_LOSS_PCT = 1.5      # New 1.5% Shield
-    TARGET_OVER_MAGNET = 10.0 # 10% Moonshot Target
+    TRIGGER_THRESHOLD = 1.5  
+    STOP_LOSS_PCT = 1.5      
+    TARGET_OVER_MAGNET = 10.0 
     
-    # Default outputs
-    profit = 0.0
-    result = "HOLD"
-
-    # --- SAFETY CHECK ---
-    if not current_price or not average or average == 0 or history_df is None:
+    # --- SAFETY SHIELD ---
+    if current_price is None or average is None or average == 0 or history_df is None:
         return 0.0, 0.0, "WAITING", WAGER_SIZE
 
-    # --- INDICATOR PREP (EMA 5 & WMA 5) ---
-    price_col = 'Balance' if 'Balance' in history_df.columns else 'price_usd'
-    prices = history_df[price_col].values
-    ema_5 = history_df[price_col].ewm(span=5, adjust=False).mean().iloc[-1]
+    # --- INDICATOR PREP ---
+    price_col = 'balance' if 'balance' in [c.lower() for c in history_df.columns] else 'price_usd'
+    # Find the actual case-sensitive name of the column
+    actual_col = [c for c in history_df.columns if c.lower() == price_col][0]
+    prices = history_df[actual_col].values
+    ema_5 = history_df[actual_col].ewm(span=5, adjust=False).mean().iloc[-1]
     wma_5 = calculate_wma(prices, period=5)
 
-    # --- 1. ACTIVE TRADE MONITORING (Stage-2 Trailing Exit) ---
+    # --- 1. ACTIVE TRADE MONITORING ---
     if os.path.exists('trades.csv'):
-        df = pd.read_csv('trades.csv')
-        if not df.empty:
-            df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in df.columns]
-            mask = (df['result'] == 'OPEN') & (df['Asset'] == asset)
-            
-            if mask.any():
-                idx = df[mask].index[-1]
-                entry_price = df.at[idx, 'price']
+        try:
+            df = pd.read_csv('trades.csv')
+            if not df.empty:
+                # Force lowercase for internal logic to match Penny
+                df.columns = [c.lower().strip() for c in df.columns]
+                mask = (df['result'] == 'OPEN') & (df['asset'].str.lower() == asset.lower())
                 
-                current_performance_pct = ((bid_price - entry_price) / entry_price) * 100
-                hit_magnet = (bid_price >= average)
-                hit_moonshot = (bid_price >= average * (1 + (TARGET_OVER_MAGNET / 100)))
-                dropped_below_wma = (bid_price < wma_5)
+                if mask.any():
+                    idx = df[mask].index[-1]
+                    entry_price = df.at[idx, 'price']
+                    perf = ((bid_price - entry_price) / entry_price) * 100
+                    
+                    # Exit Checks
+                    hit_moonshot = (bid_price >= average * (1 + (TARGET_OVER_MAGNET / 100)))
+                    hit_magnet_exit = (bid_price >= average and bid_price < wma_5)
+                    hit_stop = (perf <= -STOP_LOSS_PCT)
 
-                # EXIT LOGIC: Stage 2 Trailing
-                # 1. Take the full 10% Moonshot if hit
-                # 2. If above Magnet but trend breaks (Price < WMA 5), Sell.
-                # 3. If still below entry, check Stop Loss.
-                
-                exit_triggered = False
-                if hit_moonshot:
-                    result = "WIN_MOONSHOT"
-                    exit_triggered = True
-                elif hit_magnet and dropped_below_wma:
-                    result = "WIN_TRAILING"
-                    exit_triggered = True
-                elif current_performance_pct <= -STOP_LOSS_PCT:
-                    result = "LOSS"
-                    exit_triggered = True
+                    res = "OPEN"
+                    exit_now = False
 
-                if exit_triggered:
-                    profit = WAGER_SIZE * (current_performance_pct / 100)
-                    df.at[idx, 'result'] = result
-                    df.at[idx, 'profit_usd'] = profit
-                    df.to_csv('trades.csv', index=False)
-                    return profit, profit, result, WAGER_SIZE
-                
-                else:
-                    floating_pl = WAGER_SIZE * (current_performance_pct / 100)
-                    return 0.0, floating_pl, "OPEN", WAGER_SIZE
+                    if hit_moonshot:
+                        res, exit_now = "WIN_MOONSHOT", True
+                    elif hit_magnet_exit:
+                        res, exit_now = "WIN_TRAILING", True
+                    elif hit_stop:
+                        res, exit_now = "LOSS", True
 
-    # --- 2. NEW TRADE ANALYSIS (Fast Hook) ---
+                    if exit_now:
+                        pnl = WAGER_SIZE * (perf / 100)
+                        df.at[idx, 'result'] = res
+                        df.at[idx, 'profit_usd'] = pnl
+                        df.to_csv('trades.csv', index=False)
+                        return pnl, pnl, res, WAGER_SIZE
+                    
+                    return 0.0, WAGER_SIZE * (perf / 100), "OPEN", WAGER_SIZE
+        except Exception:
+            pass
+
+    # --- 2. NEW TRADE ANALYSIS ---
     snap_pct = ((current_price - average) / average) * 100
-    
-    # Fast Hook: Price must be above the 5-period EMA
     fast_hook = current_price > ema_5
-    
-    # Entry Trigger: Snap < -1.5%, RSI < 35, and Fast Hook Detected
     can_buy = (snap_pct <= -TRIGGER_THRESHOLD) and fast_hook and (rsi is not None and rsi < 35)
 
-    trade_action = "WAITING"
-    if can_buy: trade_action = "BUY"
-
-    # --- 3. EXECUTION & LOGGING ---
-    if trade_action == "BUY":
+    # --- 3. EXECUTION ---
+    if can_buy:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        execution_price = ask_price
+        # Use lowercase columns to stay in sync with Penny
+        new_row = pd.DataFrame([[ts, asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]], 
+                             columns=['timestamp','asset','type','price','wager', 'result','profit_usd'])
         
-        new_trade = pd.DataFrame([[ts, asset, trade_action, float(execution_price), WAGER_SIZE, "OPEN", 0.0]], 
-                                   columns=['timestamp','Asset','type','price','wager', 'result','profit_usd'])
-        
-        file_exists = os.path.exists('trades.csv')
-        new_trade.to_csv('trades.csv', mode='a', header=not file_exists, index=False, lineterminator='\n')
-        return 0.0, 0.0, trade_action, WAGER_SIZE
+        new_row.to_csv('trades.csv', mode='a', header=not os.path.exists('trades.csv'), index=False)
+        return 0.0, 0.0, "BUY", WAGER_SIZE
 
     return 0.0, 0.0, "HOLD", WAGER_SIZE
