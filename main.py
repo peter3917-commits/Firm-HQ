@@ -31,15 +31,24 @@ with tab1:
         try:
             vault_df = conn.read(worksheet="Vault", ttl=0)
             if not vault_df.empty:
-                # 🛡️ NORMALIZATION SHIELD
-                vault_df.columns = [c.capitalize() if c.lower() == 'asset' else c for c in vault_df.columns]
+                # 🛡️ NORMALIZATION SHIELD (Force standard lowercase for logic processing)
+                vault_df.columns = [c.lower().strip() for c in vault_df.columns]
                 
-                vault_df['Balance'] = pd.to_numeric(vault_df['Balance'], errors='coerce')
-                vault_df['Timestamp'] = pd.to_datetime(vault_df['Timestamp'], errors='coerce')
+                # --- 🕵️ X-RAY DEBUGGER ---
+                st.sidebar.divider()
+                st.sidebar.caption("🛰️ Sentinel X-Ray")
+                st.sidebar.write("Columns:", list(vault_df.columns))
                 
-                # --- 🕵️ DEBUG CHECK ---
+                # Handle potential casing variations from Sheets
+                bal_col = 'balance' if 'balance' in vault_df.columns else 'Balance'
+                ts_col = 'timestamp' if 'timestamp' in vault_df.columns else 'Timestamp'
+                ast_col = 'asset' if 'asset' in vault_df.columns else 'Asset'
+
+                vault_df[bal_col] = pd.to_numeric(vault_df[bal_col], errors='coerce')
+                vault_df[ts_col] = pd.to_datetime(vault_df[ts_col], errors='coerce')
+                
                 raw_rows = len(vault_df)
-                vault_df = vault_df.dropna(subset=['Timestamp', 'Balance']).copy()
+                vault_df = vault_df.dropna(subset=[ts_col, bal_col]).copy()
                 valid_rows = len(vault_df)
                 
                 if valid_rows > 0:
@@ -48,11 +57,10 @@ with tab1:
                     st.warning(f"⚠️ Found {raw_rows} rows in Sheets, but the data format is invalid.")
         except Exception as e:
             st.error(f"Vault Read Error: {e}")
-            vault_df = pd.DataFrame(columns=["Staff", "Timestamp", "Asset", "Balance"])
+            vault_df = pd.DataFrame(columns=["staff", "timestamp", "asset", "balance"])
 
         # --- 🛰️ THE MULTI-ASSET LOOP ---
         for coin in ASSETS:
-            # Containerizing the coin ensures one doesn't block the other
             with st.container():
                 price = george.scout_live_price(coin)
                 
@@ -60,25 +68,21 @@ with tab1:
                     st.divider()
                     st.header(f"🛰️ Sector: {coin}")
                     
-                    # 2. Data Shredding
-                    # Use case-insensitive matching for "bitcoin" vs "Bitcoin"
-                    asset_history = vault_df[vault_df['Asset'].str.lower() == coin.lower()].copy()
+                    # 2. Data Shredding (Using the Normalized Lowercase Columns)
+                    asset_history = vault_df[vault_df['asset'].str.lower() == coin.lower()].copy()
                     
-                    # Widened window for early-stage collection (19h data is fine here)
                     cutoff = datetime.now() - timedelta(hours=72)
-                    asset_history = asset_history[asset_history['Timestamp'] > cutoff]
+                    asset_history = asset_history[asset_history['timestamp'] > cutoff]
                     
                     # 3. Market Intel Columns
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric(f"Live {coin}", f"${price:,.2f}")
                     
-                    # 4. Arthur's Analysis (Safe Check)
-                    # We pass the history even if small so Arthur can attempt WMA/EMA
+                    # 4. Arthur's Analysis (Renaming for Arthur's logic)
                     analysis = arthur.check_for_snap(
-                        coin, price, asset_history.rename(columns={"Balance": "price_usd"})
+                        coin, price, asset_history.rename(columns={"balance": "price_usd"})
                     )
                     
-                    # Check if Arthur returned a valid tuple
                     if analysis and analysis[0] is not None:
                         moving_avg, snap_pct, rsi_val, hook_found = analysis
                         
@@ -91,7 +95,6 @@ with tab1:
                         st.divider()
                         st.subheader(f"Lawrence: {coin} Execution")
                         
-                        # Note: We pass history_df=asset_history as required by your new Lawrence code
                         gross, net, outcome, wager = lawrence.execute_trade(
                             coin, price, moving_avg, rsi=rsi_val, history_df=asset_history
                         )
@@ -109,7 +112,6 @@ with tab1:
                         else:
                             st.write(f"⚖️ Lawrence is holding {coin}.")
                     else:
-                        # This keeps ETH/SOL on the screen even if they have low history
                         c2.info(f"📡 {coin}: Scouting...")
                         c3.write(f"Vault Data: {len(asset_history)} points")
                         c4.caption("Need 14+ points for RSI")
@@ -136,10 +138,14 @@ with tab2:
 
             st.divider()
             st.subheader("📜 Master Accounting Ledger")
-            st.dataframe(ledger['trades_df'].sort_index(ascending=False), width="stretch")
-            
-            if 'LEGACY_CLEANUP' in ledger['trades_df']['result'].values:
-                st.toast("🧹 Penny just cleaned up legacy ghost trades.", icon="🧹")
+            # Ensure trades_df exists and has the expected columns before displaying
+            if not ledger['trades_df'].empty:
+                st.dataframe(ledger['trades_df'].sort_index(ascending=False), width="stretch")
+                
+                if 'result' in ledger['trades_df'].columns and 'LEGACY_CLEANUP' in ledger['trades_df']['result'].values:
+                    st.toast("🧹 Penny just cleaned up legacy ghost trades.", icon="🧹")
+            else:
+                st.info("No trades recorded in the ledger yet.")
                 
     except Exception as e:
         st.error(f"Accounting Office Error: {e}")
