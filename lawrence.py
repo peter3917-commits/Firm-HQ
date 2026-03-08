@@ -15,9 +15,14 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     Lawrence 3.0: Momentum-Reversal Execution.
     Standardized to match Penny's lowercase ledger format.
     """
+    # --- TICKER BRIDGE ---
+    # Maps George's full names to Penny's tickers
+    ticker_map = {"BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL"}
+    search_asset = ticker_map.get(asset.upper(), asset).upper()
+
     # --- INSTITUTIONAL SETTINGS ---
-    ask_price = current_price * 1.0001
-    bid_price = current_price * 0.9999
+    ask_price = current_price * 1.0001 if current_price else 0
+    bid_price = current_price * 0.9999 if current_price else 0
     TOTAL_BANK = 1000.0  
     WAGER_SIZE = TOTAL_BANK * 0.10 
     
@@ -45,10 +50,8 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     # --- 1. ACTIVE TRADE MONITORING ---
     if os.path.exists('trades.csv'):
         try:
-            # Read and keep original headers for writing back accurately
             df = pd.read_csv('trades.csv')
             if not df.empty:
-                # Use a temp list for case-insensitive matching
                 cols_check = [c.lower().strip() for c in df.columns]
                 
                 # Identify column indices
@@ -57,10 +60,12 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
                 prc_idx = cols_check.index('price')
                 pnl_idx = cols_check.index('profit_usd')
 
-                # Filter for OPEN trades for this specific asset
-                # Use .iloc to ensure we are modifying the original dataframe structure
                 for i in range(len(df)):
-                    if str(df.iloc[i, res_idx]).upper() == 'OPEN' and str(df.iloc[i, ast_idx]).lower() == asset.lower():
+                    # FIX: Compare using the Ticker Bridge (search_asset)
+                    csv_asset = str(df.iloc[i, ast_idx]).strip().upper()
+                    is_open = str(df.iloc[i, res_idx]).strip().upper() == 'OPEN'
+                    
+                    if is_open and csv_asset == search_asset:
                         entry_price = float(df.iloc[i, prc_idx])
                         perf = ((bid_price - entry_price) / entry_price) * 100
                         
@@ -86,7 +91,6 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
                             df.to_csv('trades.csv', index=False)
                             return pnl_val, pnl_val, outcome, WAGER_SIZE
                         
-                        # If still open, return current floating P/L
                         return 0.0, WAGER_SIZE * (perf / 100), "OPEN", WAGER_SIZE
         except Exception as e:
             print(f"Lawrence Error: {e}")
@@ -100,7 +104,8 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     # --- 3. EXECUTION ---
     if can_buy:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        new_row = pd.DataFrame([[ts, asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]], 
+        # Record using the Ticker to match Penny's preference
+        new_row = pd.DataFrame([[ts, search_asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]], 
                              columns=['timestamp','asset','type','price','wager', 'result','profit_usd'])
         
         new_row.to_csv('trades.csv', mode='a', header=not os.path.exists('trades.csv'), index=False)
