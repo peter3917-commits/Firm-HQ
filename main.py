@@ -75,26 +75,24 @@ with tab1:
 with tab2:
     st.title("💼 Firm HQ: Executive Summary")
     try:
-        # 1. VAULT-FIRST DATA RETRIEVAL (The "George-is-Writing" Fix)
-        # We look at the actual Vault sheet first because George is updating it every 5 mins.
+        # 1. VAULT-FIRST DATA RETRIEVAL (George's Source of Truth)
         v_df = conn.read(worksheet="Vault", ttl=0)
         current_prices = {}
         ticker_map = {"BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL"}
         
         if not v_df.empty:
-            # Shield: Standardize Vault column names
+            # Shield: Standardize Vault column names to match your headings (Staff, Timestamp, Asset, Balance)
             v_df.columns = [str(c).strip().upper() for c in v_df.columns]
             
             for asset_name in ASSETS:
                 name_upper = asset_name.upper()
-                # Find the LATEST entry for this asset
+                # Grab the LATEST row where Asset matches (e.g., "Bitcoin")
                 asset_rows = v_df[v_df['ASSET'].str.strip().str.upper() == name_upper]
                 
                 if not asset_rows.empty:
-                    # Get price from 'BALANCE' column (as per your vault structure)
                     raw_price = asset_rows.iloc[-1]['BALANCE']
                     try:
-                        price_val = float(raw_price)
+                        price_val = float(str(raw_price).replace(',', '').replace('$', ''))
                         current_prices[name_upper] = price_val
                         ticker = ticker_map.get(name_upper)
                         if ticker:
@@ -102,7 +100,7 @@ with tab2:
                     except:
                         continue
 
-        # 2. API FALLBACK: If Vault sync failed for any reason, try George's Scout
+        # 2. API FALLBACK: If Vault is missing data, try George's Scout
         for asset_name in ASSETS:
             name_up = asset_name.upper()
             if name_up not in current_prices:
@@ -141,7 +139,6 @@ with tab2:
             desk_df = penny.format_institutional_ledger(ledger['trades_df'], current_prices)
             
             if not desk_df.empty:
-                # TYPE SAFETY: Ensure MTM and Return are handled even if the word 'BTC' is lowercase in CSV
                 for idx, row in desk_df.iterrows():
                     ticker_in_row = str(row['Ticker']).strip().upper()
                     if row['Status'] == "🟢 ACTIVE" and ticker_in_row in current_prices:
@@ -153,20 +150,22 @@ with tab2:
                         new_ret = ((live_val - entry_val) / entry_val) * 100
                         desk_df.at[idx, 'Return (%)'] = new_ret
                         
-                        # P/L logic: wager * return
+                        # P/L logic: original wager * return decimal
                         wager_orig = ledger['trades_df'].iloc[idx]['wager']
                         desk_df.at[idx, 'P/L ($)'] = wager_orig * (new_ret / 100)
 
-                # 7. DISPLAY (Fixed Streamlit Syntax)
+                # 7. DISPLAY (Fixed for Streamlit 2026: Width="stretch")
                 st.dataframe(
                     desk_df.sort_index(ascending=False).style.map(
                         lambda x: f'color: {"#00ff00" if x > 0 else "#ff4b4b" if x < 0 else "white"}', 
                         subset=['Return (%)', 'P/L ($)']
                     ).format({
-                        'Entry Price': '${:,.2f}', 'MTM Price': '${:,.2f}',
-                        'Return (%)': '{:,.2f}%', 'P/L ($)': '£{:,.2f}'
+                        'Entry Price': '${:,.2f}', 
+                        'MTM Price': '${:,.2f}',
+                        'Return (%)': '{:,.2f}%', 
+                        'P/L ($)': '£{:,.2f}'
                     }),
-                    width=None, # Replaces use_container_width to avoid log warnings
+                    width="stretch", 
                     height=450
                 )
             else:
