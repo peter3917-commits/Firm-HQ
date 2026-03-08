@@ -16,7 +16,6 @@ def get_firm_ledger(prices_dict=None):
         df = df[valid_cols]
         df.columns = [c.lower().strip() for c in df.columns]
         
-        # Numeric Safety: Protect against empty cells in the ledger
         for col in ['profit_usd', 'wager', 'price']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -45,27 +44,31 @@ def get_firm_ledger(prices_dict=None):
         return default_data
 
 def get_live_price(asset, prices_dict):
-    """SAFE MATCHING: Handles the 'BTC' vs 'Bitcoin' mismatch without crashing."""
-    if not isinstance(prices_dict, dict): return None
-    asset_u = str(asset).upper().strip()
+    """FORCED MATCHING: Ensures George's 'Bitcoin' maps to Ledger 'BTC'."""
+    if not isinstance(prices_dict, dict) or not prices_dict: return None
     
-    # Shield: Create a clean dictionary of George's data (Ignoring any temporary 'None' values)
-    clean_prices = {str(k).upper(): v for k, v in prices_dict.items() if v is not None}
+    # Standardize search term: "BTC"
+    search_asset = str(asset).strip().upper()
     
-    # 1. Check for the ticker (BTC) or full name (BITCOIN)
-    if asset_u in clean_prices:
-        return float(clean_prices[asset_u])
+    # Standardize Vault Keys: {"BITCOIN": 67104.45}
+    clean_prices = {str(k).strip().upper(): v for k, v in prices_dict.items() if v is not None}
+    
+    # 1. Direct Match (Checks if George has "BTC")
+    if search_asset in clean_prices:
+        return float(clean_prices[search_asset])
             
-    # 2. Hard-coded Cross-Reference for the BTC/Bitcoin problem
-    xr = {"BTC": "BITCOIN", "BITCOIN": "BTC", "ETH": "ETHEREUM", "SOL": "SOLANA"}
-    target = xr.get(asset_u)
+    # 2. Hard-coded Cross-Reference (The "Bitcoin Bridge")
+    # If we are looking for BTC, we also check for BITCOIN
+    xr = {"BTC": "BITCOIN", "ETH": "ETHEREUM", "SOL": "SOLANA", "BITCOIN": "BTC"}
+    target = xr.get(search_asset)
+    
     if target and target in clean_prices:
         return float(clean_prices[target])
         
     return None
 
 def calculate_unrealized(trades_df, prices_dict):
-    if trades_df is None or trades_df.empty or not prices_dict:
+    if trades_df is None or trades_df.empty:
         return 0.0, pd.DataFrame()
     unreal_total = 0.0
     open_trades = trades_df[trades_df['result'].str.upper() == 'OPEN'].copy()
@@ -74,7 +77,6 @@ def calculate_unrealized(trades_df, prices_dict):
         entry_p = float(row.get('price', 0))
         wager = float(row.get('wager', 0))
         
-        # If live price is found, calculate return; otherwise keep current value to prevent crash
         if live_p is not None and entry_p > 0:
             pnl = wager * ((live_p - entry_p) / entry_p)
             unreal_total += pnl
@@ -86,14 +88,15 @@ def format_institutional_ledger(df, prices_dict):
     report = []
     now = datetime.now()
     for _, row in df.iterrows():
-        asset = str(row.get('asset', '???')).upper()
+        asset_name = str(row.get('asset', '???'))
         res = str(row.get('result', 'UNKNOWN')).upper()
         entry_p = float(row.get('price', 0))
         wager = float(row.get('wager', 0))
         
         if res == 'OPEN' or res == 'ACTIVE':
             status = "🟢 ACTIVE"
-            live_p = get_live_price(asset, prices_dict)
+            live_p = get_live_price(asset_name, prices_dict)
+            # This is where the price updates!
             mtm = float(live_p) if live_p is not None else entry_p
             pnl = wager * ((mtm - entry_p) / entry_p) if entry_p > 0 else 0
         else:
@@ -108,7 +111,7 @@ def format_institutional_ledger(df, prices_dict):
         except: age_str = "---"
 
         report.append({
-            "Ticker": asset, "Status": status, "Age": age_str,
+            "Ticker": asset_name.upper(), "Status": status, "Age": age_str,
             "Entry Price": entry_p, "MTM Price": mtm,
             "Return (%)": ret_pct, "P/L ($)": pnl
         })
