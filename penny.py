@@ -44,34 +44,43 @@ def get_firm_ledger(prices_dict=None):
         return default_data
 
 def get_live_price(asset, prices_dict):
-    """FORCED MATCHING: Ensures George's 'Bitcoin' maps to Ledger 'BTC' without NoneType crashes."""
-    if not isinstance(prices_dict, dict) or not prices_dict: return None
+    """FORCED MATCHING with Diagnostic Feedback."""
+    if not isinstance(prices_dict, dict) or not prices_dict: 
+        print("⚠️ PENNY ALERT: George sent an EMPTY vault (prices_dict is None or empty)!")
+        return None
     
-    # Standardize search term: "BTC"
     search_asset = str(asset).strip().upper()
     
-    # Standardize Vault Keys and ensure Values are floats
+    # 1. Show us what George actually sent
+    print(f"🔍 PENNY AUDIT: Looking for '{search_asset}'. Vault Keys available: {list(prices_dict.keys())}")
+    
     clean_prices = {}
     for k, v in prices_dict.items():
         if v is not None:
             try:
                 # Type-Safety: ensure string numbers from George become floats
-                clean_prices[str(k).strip().upper()] = float(str(v).replace(',', ''))
+                val = float(str(v).replace(',', '').replace('$', '').strip())
+                clean_prices[str(k).strip().upper()] = val
             except (ValueError, TypeError):
+                print(f"❌ PENNY ERROR: Could not convert value '{v}' for key '{k}' to a number.")
                 continue
     
-    # 1. Direct Match (Checks if George has "BTC")
+    # 2. Check for Direct Match
     if search_asset in clean_prices:
-        return clean_prices[search_asset]
+        p = clean_prices[search_asset]
+        print(f"✅ MATCH FOUND: '{search_asset}' matched directly at ${p}")
+        return p
             
-    # 2. Hard-coded Cross-Reference (The "Bitcoin Bridge")
-    # Mapping BTC -> BITCOIN ensures George's "Bitcoin" key is found
+    # 3. Check Bridge (BTC -> BITCOIN)
     xr = {"BTC": "BITCOIN", "ETH": "ETHEREUM", "SOL": "SOLANA", "BITCOIN": "BTC"}
     target = xr.get(search_asset)
     
     if target and target in clean_prices:
-        return clean_prices[target]
+        p = clean_prices[target]
+        print(f"✅ BRIDGE MATCH: '{search_asset}' matched via '{target}' at ${p}")
+        return p
         
+    print(f"❓ NO MATCH: Could not find '{search_asset}' or bridge in vault.")
     return None
 
 def calculate_unrealized(trades_df, prices_dict):
@@ -84,7 +93,6 @@ def calculate_unrealized(trades_df, prices_dict):
         entry_p = float(row.get('price', 0))
         wager = float(row.get('wager', 0))
         
-        # This prevents the float() error by checking live_p is a number
         if live_p is not None and entry_p > 0:
             pnl = wager * ((live_p - entry_p) / entry_p)
             unreal_total += pnl
@@ -104,8 +112,13 @@ def format_institutional_ledger(df, prices_dict):
         if res == 'OPEN' or res == 'ACTIVE':
             status = "🟢 ACTIVE"
             live_p = get_live_price(asset_name, prices_dict)
-            # FORCE UPDATE: If live_p exists, use it.
-            mtm = float(live_p) if live_p is not None else entry_p
+            
+            # This logic dictates the MTM Price update
+            if live_p is not None:
+                mtm = float(live_p)
+            else:
+                mtm = entry_p
+                
             pnl = wager * ((mtm - entry_p) / entry_p) if entry_p > 0 else 0
         else:
             status = "✅ CLOSED"
