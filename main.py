@@ -97,8 +97,19 @@ with tab1:
 with tab2:
     st.title("💼 Firm HQ: Executive Summary")
     try:
-        # 1. Gather Market Intel
-        current_prices = {c: george.scout_live_price(c) for c in ASSETS}
+        # 1. Gather Market Intel (Ticker-Safe Mapping)
+        # We map BOTH 'Bitcoin' and 'BTC' to the price so Penny can find it regardless of name
+        raw_prices = {c: george.scout_live_price(c) for c in ASSETS}
+        current_prices = {}
+        ticker_map = {"Bitcoin": "BTC", "Ethereum": "ETH", "Solana": "SOL"}
+        
+        for name, price in raw_prices.items():
+            if price is not None:
+                current_prices[name] = price
+                # Map the Ticker variant too (e.g. Bitcoin -> BTC)
+                ticker = ticker_map.get(name)
+                if ticker:
+                    current_prices[ticker] = price
         
         # 2. Fetch Core Ledger
         ledger = penny.get_firm_ledger(prices_dict=current_prices)
@@ -120,6 +131,7 @@ with tab2:
 
             # 5. Institutional Table
             st.subheader("📜 Master Execution Ledger")
+            # We pass current_prices which now contains 'BTC' keys for the table update
             desk_df = penny.format_institutional_ledger(ledger['trades_df'], current_prices)
             
             if not desk_df.empty:
