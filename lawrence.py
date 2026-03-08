@@ -30,7 +30,6 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
         return 0.0, 0.0, "WAITING", WAGER_SIZE
 
     # --- INDICATOR PREP ---
-    # Find the price column regardless of capitalization
     cols_lower = [c.lower() for c in history_df.columns]
     if 'balance' in cols_lower:
         price_col = history_df.columns[cols_lower.index('balance')]
@@ -46,41 +45,51 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     # --- 1. ACTIVE TRADE MONITORING ---
     if os.path.exists('trades.csv'):
         try:
+            # Read and keep original headers for writing back accurately
             df = pd.read_csv('trades.csv')
             if not df.empty:
-                # Force columns to lowercase to match Penny's cleanup
-                df.columns = [c.lower().strip() for c in df.columns]
-                mask = (df['result'] == 'OPEN') & (df['asset'].str.lower() == asset.lower())
+                # Use a temp list for case-insensitive matching
+                cols_check = [c.lower().strip() for c in df.columns]
                 
-                if mask.any():
-                    idx = df[mask].index[-1]
-                    entry_price = df.at[idx, 'price']
-                    perf = ((bid_price - entry_price) / entry_price) * 100
-                    
-                    # Exit Condition Logic
-                    hit_moonshot = (bid_price >= average * (1 + (TARGET_OVER_MAGNET / 100)))
-                    hit_magnet_trend_break = (bid_price >= average and bid_price < wma_5)
-                    hit_stop = (perf <= -STOP_LOSS_PCT)
+                # Identify column indices
+                res_idx = cols_check.index('result')
+                ast_idx = cols_check.index('asset')
+                prc_idx = cols_check.index('price')
+                pnl_idx = cols_check.index('profit_usd')
 
-                    outcome = "OPEN"
-                    exit_triggered = False
+                # Filter for OPEN trades for this specific asset
+                # Use .iloc to ensure we are modifying the original dataframe structure
+                for i in range(len(df)):
+                    if str(df.iloc[i, res_idx]).upper() == 'OPEN' and str(df.iloc[i, ast_idx]).lower() == asset.lower():
+                        entry_price = float(df.iloc[i, prc_idx])
+                        perf = ((bid_price - entry_price) / entry_price) * 100
+                        
+                        # Exit Condition Logic
+                        hit_moonshot = (bid_price >= average * (1 + (TARGET_OVER_MAGNET / 100)))
+                        hit_magnet_trend_break = (bid_price >= average and bid_price < wma_5)
+                        hit_stop = (perf <= -STOP_LOSS_PCT)
 
-                    if hit_moonshot:
-                        outcome, exit_triggered = "WIN_MOONSHOT", True
-                    elif hit_magnet_trend_break:
-                        outcome, exit_triggered = "WIN_TRAILING", True
-                    elif hit_stop:
-                        outcome, exit_triggered = "LOSS", True
+                        outcome = "OPEN"
+                        exit_triggered = False
 
-                    if exit_triggered:
-                        pnl = WAGER_SIZE * (perf / 100)
-                        df.at[idx, 'result'] = outcome
-                        df.at[idx, 'profit_usd'] = pnl
-                        df.to_csv('trades.csv', index=False)
-                        return pnl, pnl, outcome, WAGER_SIZE
-                    
-                    return 0.0, WAGER_SIZE * (perf / 100), "OPEN", WAGER_SIZE
-        except Exception:
+                        if hit_moonshot:
+                            outcome, exit_triggered = "WIN_MOONSHOT", True
+                        elif hit_magnet_trend_break:
+                            outcome, exit_triggered = "WIN_TRAILING", True
+                        elif hit_stop:
+                            outcome, exit_triggered = "LOSS", True
+
+                        if exit_triggered:
+                            pnl_val = WAGER_SIZE * (perf / 100)
+                            df.iloc[i, res_idx] = outcome
+                            df.iloc[i, pnl_idx] = pnl_val
+                            df.to_csv('trades.csv', index=False)
+                            return pnl_val, pnl_val, outcome, WAGER_SIZE
+                        
+                        # If still open, return current floating P/L
+                        return 0.0, WAGER_SIZE * (perf / 100), "OPEN", WAGER_SIZE
+        except Exception as e:
+            print(f"Lawrence Error: {e}")
             pass
 
     # --- 2. NEW TRADE ANALYSIS ---
@@ -91,7 +100,6 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     # --- 3. EXECUTION ---
     if can_buy:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        # Record using Penny's preferred lowercase columns
         new_row = pd.DataFrame([[ts, asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]], 
                              columns=['timestamp','asset','type','price','wager', 'result','profit_usd'])
         
