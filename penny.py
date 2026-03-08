@@ -44,26 +44,33 @@ def get_firm_ledger(prices_dict=None):
         return default_data
 
 def get_live_price(asset, prices_dict):
-    """FORCED MATCHING: Ensures George's 'Bitcoin' maps to Ledger 'BTC'."""
+    """FORCED MATCHING: Ensures George's 'Bitcoin' maps to Ledger 'BTC' without NoneType crashes."""
     if not isinstance(prices_dict, dict) or not prices_dict: return None
     
     # Standardize search term: "BTC"
     search_asset = str(asset).strip().upper()
     
-    # Standardize Vault Keys: {"BITCOIN": 67104.45}
-    clean_prices = {str(k).strip().upper(): v for k, v in prices_dict.items() if v is not None}
+    # Standardize Vault Keys and ensure Values are floats
+    clean_prices = {}
+    for k, v in prices_dict.items():
+        if v is not None:
+            try:
+                # Type-Safety: ensure string numbers from George become floats
+                clean_prices[str(k).strip().upper()] = float(str(v).replace(',', ''))
+            except (ValueError, TypeError):
+                continue
     
     # 1. Direct Match (Checks if George has "BTC")
     if search_asset in clean_prices:
-        return float(clean_prices[search_asset])
+        return clean_prices[search_asset]
             
     # 2. Hard-coded Cross-Reference (The "Bitcoin Bridge")
-    # If we are looking for BTC, we also check for BITCOIN
+    # Mapping BTC -> BITCOIN ensures George's "Bitcoin" key is found
     xr = {"BTC": "BITCOIN", "ETH": "ETHEREUM", "SOL": "SOLANA", "BITCOIN": "BTC"}
     target = xr.get(search_asset)
     
     if target and target in clean_prices:
-        return float(clean_prices[target])
+        return clean_prices[target]
         
     return None
 
@@ -77,6 +84,7 @@ def calculate_unrealized(trades_df, prices_dict):
         entry_p = float(row.get('price', 0))
         wager = float(row.get('wager', 0))
         
+        # This prevents the float() error by checking live_p is a number
         if live_p is not None and entry_p > 0:
             pnl = wager * ((live_p - entry_p) / entry_p)
             unreal_total += pnl
@@ -96,7 +104,7 @@ def format_institutional_ledger(df, prices_dict):
         if res == 'OPEN' or res == 'ACTIVE':
             status = "🟢 ACTIVE"
             live_p = get_live_price(asset_name, prices_dict)
-            # This is where the price updates!
+            # FORCE UPDATE: If live_p exists, use it.
             mtm = float(live_p) if live_p is not None else entry_p
             pnl = wager * ((mtm - entry_p) / entry_p) if entry_p > 0 else 0
         else:
