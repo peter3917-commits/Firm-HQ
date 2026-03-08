@@ -64,20 +64,17 @@ def get_firm_ledger(prices_dict=None):
         return default_data
 
 def calculate_unrealized(trades_df, prices_dict):
-    """Maps BTC to Bitcoin and calculates live floating profit with float safety."""
-    if trades_df is None or trades_df.empty or not prices_dict:
+    """Calculates live floating profit with protection against None prices."""
+    if trades_df is None or trades_df.empty or not isinstance(prices_dict, dict):
         return 0.0, pd.DataFrame()
         
-    mapping = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana"}
     unreal_total = 0.0
-    
-    # Work only on OPEN trades
     open_trades = trades_df[trades_df['result'].str.upper() == 'OPEN'].copy()
     
     for idx, row in open_trades.iterrows():
-        asset = str(row.get('asset', 'UNKNOWN'))
-        # Try finding live price by symbol or full name
-        live_p = prices_dict.get(asset) or prices_dict.get(mapping.get(asset.upper()))
+        asset = str(row.get('asset', 'UNKNOWN')).upper()
+        # Look for the price in the dict regardless of case
+        live_p = prices_dict.get(asset) or prices_dict.get(asset.capitalize()) or prices_dict.get('Bitcoin' if asset == 'BTC' else asset)
         
         entry_p = float(row.get('price', 0))
         wager = float(row.get('wager', 0))
@@ -90,12 +87,13 @@ def calculate_unrealized(trades_df, prices_dict):
     return float(unreal_total), open_trades
 
 def format_institutional_ledger(df, prices_dict):
-    """The Transformer: Creates the 7-column high-info table with float safety."""
+    """Creates the 7-column table with crash-protection for prices_dict."""
     if df is None or df.empty: return pd.DataFrame()
     
-    mapping = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana"}
     report = []
     now = datetime.now()
+    # Safety: Ensure prices_dict is a valid dictionary to prevent crash
+    safe_prices = prices_dict if isinstance(prices_dict, dict) else {}
 
     for _, row in df.iterrows():
         asset = str(row.get('asset', '???')).upper()
@@ -103,28 +101,23 @@ def format_institutional_ledger(df, prices_dict):
         entry_p = float(row.get('price', 0))
         wager = float(row.get('wager', 0))
         
-        # 1. LIVE MTM & RETURN MATH
-        if res == 'OPEN':
+        if res == 'OPEN' or res == 'ACTIVE':
             status = "🟢 ACTIVE"
-            live_p = prices_dict.get(asset.capitalize()) or prices_dict.get(mapping.get(asset), 0)
+            # Robust lookup: Check BTC, then Btc, then Bitcoin
+            live_p = safe_prices.get(asset) or safe_prices.get(asset.capitalize()) or safe_prices.get('Bitcoin' if asset == 'BTC' else '')
             mtm = float(live_p) if live_p else entry_p
             pnl = wager * ((mtm - entry_p) / entry_p) if entry_p > 0 else 0
         else:
             status = "✅ CLOSED"
             pnl = float(row.get('profit_usd', 0))
-            # Reverse engineer MTM for closed trades
             mtm = entry_p * (1 + (pnl / wager)) if wager > 0 else entry_p
             
         ret_pct = (pnl / wager) * 100 if wager > 0 else 0
         
-        # 2. AGE CALCULATION
         try:
             ts = pd.to_datetime(row.get('timestamp'))
             delta = now - ts
-            if delta.days > 0:
-                age_str = f"{delta.days}d {delta.seconds // 3600}h"
-            else:
-                age_str = f"{delta.seconds // 3600}h {(delta.seconds % 3600) // 60}m"
+            age_str = f"{delta.days}d {delta.seconds // 3600}h" if delta.days > 0 else f"{delta.seconds // 3600}h"
         except:
             age_str = "---"
 
