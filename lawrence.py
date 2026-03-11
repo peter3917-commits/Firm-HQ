@@ -10,13 +10,12 @@ def calculate_wma(prices, period=5):
     weights = np.arange(1, period + 1)
     return (prices[-period:] * weights).sum() / weights.sum()
 
-def execute_trade(asset, current_price, average, rsi=None, history_df=None):
+def execute_trade(asset, current_price, average, rsi=None, history_df=None, ledger_df=None):
     """
-    Lawrence 3.0: Momentum-Reversal Execution.
-    Standardized to match Penny's lowercase ledger format.
+    Lawrence 4.0: Cloud-Native Execution.
+    Now accepts ledger_df from Google Sheets and returns trade info to main.py.
     """
     # --- TICKER BRIDGE ---
-    # Maps George's full names to Penny's tickers
     ticker_map = {"BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL"}
     search_asset = ticker_map.get(asset.upper(), asset).upper()
 
@@ -32,7 +31,7 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     
     # --- SAFETY SHIELD ---
     if current_price is None or average is None or average == 0 or history_df is None:
-        return 0.0, 0.0, "WAITING", WAGER_SIZE
+        return 0.0, 0.0, "WAITING", None
 
     # --- INDICATOR PREP ---
     cols_lower = [c.lower() for c in history_df.columns]
@@ -41,60 +40,58 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     elif 'price_usd' in cols_lower:
         price_col = history_df.columns[cols_lower.index('price_usd')]
     else:
-        return 0.0, 0.0, "DATA_ERROR", WAGER_SIZE
+        return 0.0, 0.0, "DATA_ERROR", None
 
     prices_arr = history_df[price_col].values
     ema_5 = history_df[price_col].ewm(span=5, adjust=False).mean().iloc[-1]
     wma_5 = calculate_wma(prices_arr, period=5)
 
-    # --- 1. ACTIVE TRADE MONITORING ---
-    if os.path.exists('trades.csv'):
+    # --- 1. ACTIVE TRADE MONITORING (CLOUD LEDGER) ---
+    if ledger_df is not None and not ledger_df.empty:
         try:
-            df = pd.read_csv('trades.csv')
-            if not df.empty:
-                cols_check = [c.lower().strip() for c in df.columns]
+            # Clean columns for matching
+            df = ledger_df.copy()
+            df.columns = [c.lower().strip() for c in df.columns]
+            
+            # Identify row to check
+            for i in range(len(df)):
+                csv_asset = str(df.iloc[i]['asset']).strip().upper()
+                # ROBUST CHECK: Handles any hidden spaces in "OPEN"
+                is_open = str(df.iloc[i]['result']).strip().upper() == 'OPEN'
                 
-                # Identify column indices
-                res_idx = cols_check.index('result')
-                ast_idx = cols_check.index('asset')
-                prc_idx = cols_check.index('price')
-                pnl_idx = cols_check.index('profit_usd')
-
-                for i in range(len(df)):
-                    # FIX: Compare using the Ticker Bridge (search_asset)
-                    csv_asset = str(df.iloc[i, ast_idx]).strip().upper()
-                    is_open = str(df.iloc[i, res_idx]).strip().upper() == 'OPEN'
+                if is_open and csv_asset == search_asset:
+                    entry_price = float(df.iloc[i]['price'])
+                    perf = ((bid_price - entry_price) / entry_price) * 100
                     
-                    if is_open and csv_asset == search_asset:
-                        entry_price = float(df.iloc[i, prc_idx])
-                        perf = ((bid_price - entry_price) / entry_price) * 100
-                        
-                        # Exit Condition Logic
-                        hit_moonshot = (bid_price >= average * (1 + (TARGET_OVER_MAGNET / 100)))
-                        hit_magnet_trend_break = (bid_price >= average and bid_price < wma_5)
-                        hit_stop = (perf <= -STOP_LOSS_PCT)
+                    # Exit Condition Logic
+                    hit_moonshot = (bid_price >= average * (1 + (TARGET_OVER_MAGNET / 100)))
+                    hit_magnet_trend_break = (bid_price >= average and bid_price < wma_5)
+                    hit_stop = (perf <= -STOP_LOSS_PCT)
 
-                        outcome = "OPEN"
-                        exit_triggered = False
+                    outcome = "OPEN"
+                    exit_triggered = False
 
-                        if hit_moonshot:
-                            outcome, exit_triggered = "WIN_MOONSHOT", True
-                        elif hit_magnet_trend_break:
-                            outcome, exit_triggered = "WIN_TRAILING", True
-                        elif hit_stop:
-                            outcome, exit_triggered = "LOSS", True
+                    if hit_moonshot:
+                        outcome, exit_triggered = "WIN_MOONSHOT", True
+                    elif hit_magnet_trend_break:
+                        outcome, exit_triggered = "WIN_TRAILING", True
+                    elif hit_stop:
+                        outcome, exit_triggered = "LOSS", True
 
-                        if exit_triggered:
-                            pnl_val = WAGER_SIZE * (perf / 100)
-                            df.iloc[i, res_idx] = outcome
-                            df.iloc[i, pnl_idx] = pnl_val
-                            df.to_csv('trades.csv', index=False)
-                            return pnl_val, pnl_val, outcome, WAGER_SIZE
-                        
-                        return 0.0, WAGER_SIZE * (perf / 100), "OPEN", WAGER_SIZE
+                    if exit_triggered:
+                        pnl_val = WAGER_SIZE * (perf / 100)
+                        # We return the outcome and the index so main.py knows which row to update
+                        trade_update = {
+                            "index": i,
+                            "result": outcome,
+                            "profit_usd": pnl_val
+                        }
+                        return pnl_val, pnl_val, outcome, trade_update
+                    
+                    # If still open, return current unrealized
+                    return 0.0, WAGER_SIZE * (perf / 100), "OPEN", None
         except Exception as e:
-            print(f"Lawrence Error: {e}")
-            pass
+            print(f"Lawrence Audit Error: {e}")
 
     # --- 2. NEW TRADE ANALYSIS ---
     snap_pct = ((current_price - average) / average) * 100
@@ -104,11 +101,8 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None):
     # --- 3. EXECUTION ---
     if can_buy:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        # Record using the Ticker to match Penny's preference
-        new_row = pd.DataFrame([[ts, search_asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]], 
-                             columns=['timestamp','asset','type','price','wager', 'result','profit_usd'])
-        
-        new_row.to_csv('trades.csv', mode='a', header=not os.path.exists('trades.csv'), index=False)
-        return 0.0, 0.0, "BUY", WAGER_SIZE
+        # Return new trade data for main.py to append to Google Sheets
+        trade_info = [ts, search_asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]
+        return 0.0, 0.0, "BUY", trade_info
 
-    return 0.0, 0.0, "HOLD", WAGER_SIZE
+    return 0.0, 0.0, "HOLD", None
