@@ -14,12 +14,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5 # Upgraded for Node 24 support
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6 # Upgraded for Node 24 support
         with:
           python-version: '3.9'
 
@@ -30,7 +30,7 @@ jobs:
       - name: Run Scout
         env:
           GSHEETS_SECRET: ${{ secrets.GSHEETS_JSON }}
-          GSHEET_ID: ${{ secrets.GSHEET_ID }}  # <--- Added this line
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
         run: python scout_job.py
 
       - name: Commit and Push Trade Log
