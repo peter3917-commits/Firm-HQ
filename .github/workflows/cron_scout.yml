@@ -4,19 +4,19 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   repository_dispatch:
-    types: [ping_george]  # <--- This is the "Doorbell"
+    types: [ping_george]
   workflow_dispatch:
 
 jobs:
   scout:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Master Key for the Vault
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Pulls full history to prevent "shallow" push errors
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -30,9 +30,9 @@ jobs:
       - name: Run Scout
         env:
           GSHEETS_SECRET: ${{ secrets.GSHEETS_JSON }}
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}  # <--- Added this line
         run: python scout_job.py
 
-      # --- THE ULTIMATE PERMISSION BYPASS ---
       - name: Commit and Push Trade Log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,14 +40,11 @@ jobs:
           git config --local user.email "george@thefirm.ai"
           git config --local user.name "George (Background Scout)"
           
-          # Force add in case of local .gitignore conflicts
           git add -f trades.csv || true
           
           if git diff --cached --quiet; then
-            echo "No new trades recorded by Lawrence. Skipping push."
+            echo "No new trades recorded. Skipping push."
           else
             git commit -m "Lawrence updated the Ledger [skip ci]"
-            
-            # This URL format is the "Nuclear Option" for Error 128
             git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
           fi
