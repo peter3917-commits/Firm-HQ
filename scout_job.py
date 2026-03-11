@@ -5,15 +5,22 @@ from google.oauth2.service_account import Credentials
 import os, json, requests
 import lawrence # Ensure lawrence.py is in your GitHub folder!
 
-# 1. SETUP AUTH
+# 1. SETUP AUTH - SECURED FOR PUBLIC REPO
 try:
+    # Pulls the Service Account JSON from GitHub Secrets
     creds_dict = json.loads(os.environ['GSHEETS_SECRET'])
     creds = Credentials.from_service_account_info(creds_dict, scopes=[
         "https://www.googleapis.com/auth/spreadsheets", 
         "https://www.googleapis.com/auth/drive"
     ])
     client = gspread.authorize(creds)
-    sheet = client.open_by_key("1rILDKQMQoLa0KDuZXFIyERBqVcKmVGUjJy4-WXhu-A4").worksheet("Vault")
+    
+    # Pulls the Sheet ID from GitHub Secrets (prevents leaking your sheet link)
+    sheet_id = os.environ.get('GSHEET_ID')
+    if not sheet_id:
+        raise ValueError("GSHEET_ID environment variable is missing!")
+        
+    sheet = client.open_by_key(sheet_id).worksheet("Vault")
 except Exception as e:
     print(f"❌ Auth Error: {e}")
     exit(1)
@@ -88,7 +95,6 @@ for asset_name in ASSETS.keys():
         asset_df['Balance'] = pd.to_numeric(asset_df['Balance'])
         
         # Arthur calculates the "Magnet" using the last 576 points (exactly 48 hours)
-        # We now have a 50h buffer, so this will always be a full sample.
         magnet = asset_df['Balance'].tail(576).mean()
         current_price = float(asset_df['Balance'].iloc[-1])
         
@@ -98,8 +104,6 @@ for asset_name in ASSETS.keys():
         print(f"Sect: {asset_name} | Price: ${current_price:,.2f} | Magnet: ${magnet:,.2f} | Law: {result}")
 
 # D. SHRED & HIGH-SPEED SYNC
-# --- 🛡️ THE 50H BUFFER SHIELD ---
-# We keep 50 hours in the sheet so main.py (looking for 48h) never runs out of data.
 cutoff = datetime.utcnow() - timedelta(hours=50)
 df = df[df['Timestamp'] > cutoff]
 
@@ -109,7 +113,6 @@ if not df.empty:
     
     data_to_save = [df_sync.columns.values.tolist()] + df_sync.values.tolist()
     try:
-        # Clear and update to ensure the sheet stays clean
         sheet.clear()
         sheet.update(range_name='A1', values=data_to_save)
         print(f"✅ Vault synchronized. Current Depth: {len(df_sync)} rows across 3 sectors.")
