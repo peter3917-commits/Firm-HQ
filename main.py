@@ -25,6 +25,11 @@ with tab1:
 
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
+        
+        # Fresh Ledger Fetch for Lawrence's awareness
+        ledger_data = penny.get_firm_ledger(conn)
+        live_ledger_df = ledger_data['trades_df']
+
         vault_df = conn.read(worksheet="Vault", ttl=0)
         if not vault_df.empty:
             vault_df.columns = [c.lower().strip() for c in vault_df.columns]
@@ -56,8 +61,33 @@ with tab1:
                         
                         st.divider()
                         st.subheader(f"Lawrence: {coin} Execution")
-                        gross, net, outcome, wager = lawrence.execute_trade(coin, price, moving_avg, rsi=rsi_val, history_df=asset_history)
                         
+                        # --- UPDATED LAWRENCE CALL ---
+                        gross, net, outcome, trade_data = lawrence.execute_trade(
+                            coin, price, moving_avg, rsi=rsi_val, 
+                            history_df=asset_history, ledger_df=live_ledger_df
+                        )
+                        
+                        # --- GOOGLE SHEETS SYNC LOGIC ---
+                        if outcome == "BUY" and trade_data:
+                            # 1. Append new trade
+                            new_row = pd.DataFrame([trade_data], columns=['timestamp','asset','type','price','wager','result','profit_usd'])
+                            updated_df = pd.concat([live_ledger_df, new_row], ignore_index=True)
+                            conn.update(worksheet="Ledger", data=updated_df)
+                            st.success(f"🚀 NEW TRADE LOGGED: {coin}")
+                            st.rerun()
+
+                        elif outcome in ["WIN_MOONSHOT", "WIN_TRAILING", "LOSS"] and trade_data:
+                            # 1. Update existing trade row
+                            idx_to_update = trade_data['index']
+                            live_ledger_df.at[idx_to_update, 'result'] = trade_data['result']
+                            live_ledger_df.at[idx_to_update, 'profit_usd'] = trade_data['profit_usd']
+                            # 2. Push to Google
+                            conn.update(worksheet="Ledger", data=live_ledger_df)
+                            st.warning(f"🎯 TRADE CLOSED: {coin} ({outcome})")
+                            st.rerun()
+
+                        # --- DISPLAY STATUS ---
                         if outcome == "OPEN":
                             st.info(f"⏳ Trade is OPEN. Floating P/L: £{net:.2f}")
                         elif "WIN" in outcome:
@@ -81,26 +111,20 @@ with tab2:
         ticker_map = {"BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL"}
         
         if not v_df.empty:
-            # Shield: Standardize Vault column names to match your headings (Staff, Timestamp, Asset, Balance)
             v_df.columns = [str(c).strip().upper() for c in v_df.columns]
-            
             for asset_name in ASSETS:
                 name_upper = asset_name.upper()
-                # Grab the LATEST row where Asset matches (e.g., "Bitcoin")
                 asset_rows = v_df[v_df['ASSET'].str.strip().str.upper() == name_upper]
-                
                 if not asset_rows.empty:
                     raw_price = asset_rows.iloc[-1]['BALANCE']
                     try:
                         price_val = float(str(raw_price).replace(',', '').replace('$', ''))
                         current_prices[name_upper] = price_val
                         ticker = ticker_map.get(name_upper)
-                        if ticker:
-                            current_prices[ticker] = price_val
-                    except:
-                        continue
+                        if ticker: current_prices[ticker] = price_val
+                    except: continue
 
-        # 2. API FALLBACK: If Vault is missing data, try George's Scout
+        # 2. API FALLBACK
         for asset_name in ASSETS:
             name_up = asset_name.upper()
             if name_up not in current_prices:
@@ -110,14 +134,8 @@ with tab2:
                     t = ticker_map.get(name_up)
                     if t: current_prices[t] = p
         
-        # UI FEEDBACK
-        if "BTC" in current_prices:
-            st.success(f"📟 Vault & Market Sync Active: BTC @ ${current_prices['BTC']:,.2f}")
-        else:
-            st.warning("⚠️ Market Data Sync Issues: Using ledger defaults.")
-
-        # 3. FETCH CORE LEDGER
-        ledger = penny.get_firm_ledger(prices_dict=current_prices)
+        # 3. FETCH CORE LEDGER (Updated with 'conn')
+        ledger = penny.get_firm_ledger(conn, prices_dict=current_prices)
         
         if ledger and isinstance(ledger, dict):
             # 4. CALCULATE LIVE FLOAT
@@ -134,27 +152,12 @@ with tab2:
 
             st.divider()
 
-            # 6. MASTER EXECUTION LEDGER (With Force-Update Safeties)
+            # 6. MASTER EXECUTION LEDGER
             st.subheader("📜 Master Execution Ledger")
             desk_df = penny.format_institutional_ledger(ledger['trades_df'], current_prices)
             
             if not desk_df.empty:
-                for idx, row in desk_df.iterrows():
-                    ticker_in_row = str(row['Ticker']).strip().upper()
-                    if row['Status'] == "🟢 ACTIVE" and ticker_in_row in current_prices:
-                        live_val = current_prices[ticker_in_row]
-                        entry_val = row['Entry Price']
-                        
-                        # Apply live data injection
-                        desk_df.at[idx, 'MTM Price'] = live_val
-                        new_ret = ((live_val - entry_val) / entry_val) * 100
-                        desk_df.at[idx, 'Return (%)'] = new_ret
-                        
-                        # P/L logic: original wager * return decimal
-                        wager_orig = ledger['trades_df'].iloc[idx]['wager']
-                        desk_df.at[idx, 'P/L ($)'] = wager_orig * (new_ret / 100)
-
-                # 7. DISPLAY (Fixed for Streamlit 2026: Width="stretch")
+                # Format and Display
                 st.dataframe(
                     desk_df.sort_index(ascending=False).style.map(
                         lambda x: f'color: {"#00ff00" if x > 0 else "#ff4b4b" if x < 0 else "white"}', 
@@ -165,7 +168,7 @@ with tab2:
                         'Return (%)': '{:,.2f}%', 
                         'P/L ($)': '£{:,.2f}'
                     }),
-                    width="stretch", 
+                    use_container_width=True, 
                     height=450
                 )
             else:
