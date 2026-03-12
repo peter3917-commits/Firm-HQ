@@ -35,7 +35,9 @@ with tab1:
             vault_df.columns = [c.lower().strip() for c in vault_df.columns]
             bal_col = 'balance' if 'balance' in vault_df.columns else 'price_usd'
             vault_df[bal_col] = pd.to_numeric(vault_df[bal_col], errors='coerce')
-            vault_df['timestamp'] = pd.to_datetime(vault_df['timestamp'], errors='coerce')
+            
+            # --- TIMEZONE SHIELD: Force Naive Timestamps ---
+            vault_df['timestamp'] = pd.to_datetime(vault_df['timestamp'], errors='coerce').dt.tz_localize(None)
             vault_df = vault_df.dropna(subset=['timestamp', bal_col]).copy()
 
         for coin in ASSETS:
@@ -45,7 +47,9 @@ with tab1:
                     st.divider()
                     st.header(f"🛰️ Sector: {coin}")
                     asset_history = vault_df[vault_df['asset'].str.lower() == coin.lower()].copy()
-                    cutoff = datetime.now() - timedelta(hours=72)
+                    
+                    # --- TIMEZONE SHIELD: Match Cutoff to Naive Timestamps ---
+                    cutoff = datetime.now().replace(tzinfo=None) - timedelta(hours=72)
                     asset_history = asset_history[asset_history['timestamp'] > cutoff]
                     
                     c1, c2, c3, c4 = st.columns(4)
@@ -70,7 +74,6 @@ with tab1:
                         
                         # --- GOOGLE SHEETS SYNC LOGIC ---
                         if outcome == "BUY" and trade_data:
-                            # 1. Append new trade
                             new_row = pd.DataFrame([trade_data], columns=['timestamp','asset','type','price','wager','result','profit_usd'])
                             updated_df = pd.concat([live_ledger_df, new_row], ignore_index=True)
                             conn.update(worksheet="Ledger", data=updated_df)
@@ -78,11 +81,9 @@ with tab1:
                             st.rerun()
 
                         elif outcome in ["WIN_MOONSHOT", "WIN_TRAILING", "LOSS"] and trade_data:
-                            # 1. Update existing trade row
                             idx_to_update = trade_data['index']
                             live_ledger_df.at[idx_to_update, 'result'] = trade_data['result']
                             live_ledger_df.at[idx_to_update, 'profit_usd'] = trade_data['profit_usd']
-                            # 2. Push to Google
                             conn.update(worksheet="Ledger", data=live_ledger_df)
                             st.warning(f"🎯 TRADE CLOSED: {coin} ({outcome})")
                             st.rerun()
@@ -134,7 +135,7 @@ with tab2:
                     t = ticker_map.get(name_up)
                     if t: current_prices[t] = p
         
-        # 3. FETCH CORE LEDGER (Updated with 'conn')
+        # 3. FETCH CORE LEDGER
         ledger = penny.get_firm_ledger(conn, prices_dict=current_prices)
         
         if ledger and isinstance(ledger, dict):
@@ -168,7 +169,7 @@ with tab2:
                         'Return (%)': '{:,.2f}%', 
                         'P/L ($)': '£{:,.2f}'
                     }),
-                    use_container_width=True, 
+                    width="stretch", # FIXED: Replaced use_container_width
                     height=450
                 )
             else:
