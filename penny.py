@@ -115,7 +115,9 @@ def calculate_unrealized(trades_df, prices_dict):
 def format_institutional_ledger(df, prices_dict):
     if df is None or df.empty: return pd.DataFrame()
     report = []
-    now = datetime.now()
+    
+    # Matching the Timezone Shield in main.py
+    now = datetime.now().replace(tzinfo=None)
     
     # Clean the result column for logic
     df['result_clean'] = df['result'].astype(str).str.lower().str.strip()
@@ -138,8 +140,10 @@ def format_institutional_ledger(df, prices_dict):
             
         ret_pct = (pnl / wager) * 100 if wager > 0 else 0
         try:
-            ts = pd.to_datetime(row.get('timestamp'))
-            age_str = f"{(now - ts).days}d {(now - ts).seconds // 3600}h"
+            # Ensure timestamp is naive for safe Age calculation
+            ts = pd.to_datetime(row.get('timestamp')).tz_localize(None)
+            diff = now - ts
+            age_str = f"{diff.days}d {diff.seconds // 3600}h"
         except: age_str = "---"
 
         report.append({
