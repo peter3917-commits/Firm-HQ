@@ -4,7 +4,7 @@ from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import george, arthur, lawrence, penny
 from datetime import datetime, timedelta
-import altair as alt # ADDED: For 24h sector graphs
+import altair as alt
 
 # Institutional Wide Layout
 st.set_page_config(page_title="Firm HQ: 48h Sentinel", page_icon="🏛️", layout="wide")
@@ -42,13 +42,12 @@ with tab1:
             vault_df = vault_df.dropna(subset=['timestamp', bal_col]).copy()
 
         for coin in ASSETS:
-            with st.container():
+            # 2026 UPGRADE: Bordered containers ensure stable layout for lower sectors (Solana)
+            with st.container(border=True):
                 price = george.scout_live_price(coin)
                 if price:
-                    st.divider()
                     st.header(f"🛰️ Sector: {coin}")
                     
-                    # Filter history for this specific asset
                     asset_history = vault_df[vault_df['asset'].str.lower() == coin.lower()].copy()
                     
                     # --- TIMEZONE SHIELD: Match Cutoff to Naive Timestamps ---
@@ -66,7 +65,7 @@ with tab1:
                         c3.metric("Snap %", f"{snap_pct:.2f}%", delta=f"{snap_pct:.2f}%", delta_color=st_color)
                         c4.metric("RSI (14)", f"{rsi_val:.1f}")
                         
-                        # --- 📈 ADDED: 24H SECTOR VISUALIZATION ---
+                        # --- 📈 2026 STANDARDIZED: 24H SECTOR VISUALIZATION ---
                         chart_cutoff = datetime.now().replace(tzinfo=None) - timedelta(hours=24)
                         chart_data = asset_history[asset_history['timestamp'] > chart_cutoff].copy()
 
@@ -79,9 +78,10 @@ with tab1:
                                 x=alt.X('timestamp:T', title='Timeline (Last 24h)'),
                                 y=alt.Y('Price:Q', title='Price ($)', scale=alt.Scale(zero=False)),
                                 tooltip=['timestamp', 'Price']
-                            ).properties(height=200, width="container").interactive()
+                            ).properties(height=200).interactive()
                             
-                            st.altair_chart(line_chart, use_container_width=True)
+                            # FIXED: use_container_width replaced with width="stretch"
+                            st.altair_chart(line_chart, width="stretch")
                         else:
                             st.caption("Insufficient 24h data for Sector Graph.")
 
@@ -120,7 +120,7 @@ with tab1:
                         else:
                             st.write(f"⚖️ Lawrence is holding {coin}.")
                     else:
-                        c2.info(f"📡 {coin}: Scouting...")
+                        st.info(f"📡 {coin}: Scouting sector data...")
     except Exception as e:
         st.error(f"Sentinel System Error: {e}")
 
