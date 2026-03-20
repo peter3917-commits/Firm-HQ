@@ -27,7 +27,7 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None, ledg
     ask_price = round(current_price * 1.0001, 2) if current_price else 0
     bid_price = round(current_price * 0.9999, 2) if current_price else 0
     
-    STOP_LOSS_PCT = 1.5      
+    STOP_LOSS_PCT = 3.5      
     TARGET_OVER_MAGNET = 10.0 
     
     # --- SAFETY SHIELD ---
