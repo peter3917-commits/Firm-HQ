@@ -19,8 +19,8 @@ def generate_deterministic_id(asset, interval_ms=300000):
 
 def execute_trade(asset, current_price, average, rsi=None, history_df=None, ledger_df=None, tradable_balance=1000.0):
     """
-    Lawrence 6.0: The Reversion Sentinel.
-    Features: UUID v5 Determinism, 1.0% Hard Shield, and Trailing Magnet Exit.
+    Lawrence 6.1: The Liquid Sentinel.
+    Features: UUID v5 Determinism, 1.0% Hard Shield, and Insufficient Funds Check.
     Corrects the 'Momentum Trap' by prioritizing the 24h Magnet Reversion.
     """
     # --- TICKER BRIDGE ---
@@ -36,7 +36,6 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None, ledg
     
     # Recalibrated Shield and Exit targets
     STOP_LOSS_PCT = 1.0       # 1% Hard Shield to protect the Vault
-    TRAILING_GAP = 0.5        # 0.5% Trail once Magnet is breached
     
     # --- SAFETY SHIELD ---
     if current_price is None or average is None or average == 0 or history_df is None:
@@ -62,11 +61,7 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None, ledg
                     perf = ((bid_price - entry_price) / entry_price) * 100
                     
                     # --- REVERSION EXIT LOGIC ---
-                    # A) THE SHIELD: Exit if price drops 1% below entry
                     hit_stop = (perf <= -STOP_LOSS_PCT)
-                    
-                    # B) THE MAGNET TRAIL: Exit if price returns to or exceeds 24h Average
-                    # Note: We exit at Magnet touch to ensure £200/mo volume targets
                     hit_magnet_reversion = (bid_price >= average)
 
                     outcome = "OPEN"
@@ -88,25 +83,24 @@ def execute_trade(asset, current_price, average, rsi=None, history_df=None, ledg
                     
                     return 0.0, round(current_wager * (perf / 100), 2), "OPEN", None
         except Exception as e:
-            print(f"🏛️ LAWRENCE ERROR: Ledger corruption detected at row {i}. Skipping...")
+            print(f"🏛️ LAWRENCE ERROR: Ledger corruption detected. Skipping...")
 
     # --- 2. NEW TRADE ANALYSIS ---
     snap_pct = ((current_price - average) / average) * 100
-    
-    # The Hook: Confirming the 5-min trend has reversed
     last_price = history_df.iloc[-1].values[-1] if not history_df.empty else current_price
     fast_hook = current_price > last_price
     
-    # Triple-Filter Entry: Stretch + Panic + Hook
     can_buy = (snap_pct <= -1.5) and (rsi is not None and rsi < 35) and fast_hook
 
     # --- 3. EXECUTION ---
     if can_buy:
-        # Generate Deterministic ID for Exchange Idempotency
+        # 🛡️ THE LIQUIDITY FILTER
+        if tradable_balance < WAGER_SIZE:
+            print(f"⚖️ LAWRENCE: Insufficient Funds for {search_asset}. (Needed: £{WAGER_SIZE})")
+            return 0.0, 0.0, "INSUFFICIENT_FUNDS", None
+
         order_id = generate_deterministic_id(search_asset)
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # trade_info includes order_id for future API recovery
         trade_info = [ts, search_asset, "BUY", ask_price, WAGER_SIZE, "OPEN", 0.0]
         return 0.0, 0.0, "BUY", trade_info
 
